@@ -56,10 +56,13 @@ def main() -> int:
             source_key="EVIDENCE_RUNNER_IDENTITY", source_timestamp=now.isoformat(), db_path=db_path,
         )
 
+        # Keep intraday requests comfortably inside Yahoo's rolling limits. Using the
+        # next calendar day as an exclusive end can accidentally push an otherwise
+        # valid 59/729-day request beyond Yahoo's 60/730-day boundary.
         requests = {
             "daily": {"interval": "1d", "start": "2017-01-01", "end": (now + timedelta(days=1)).date().isoformat()},
-            "hourly": {"interval": "1h", "start": (now - timedelta(days=729)).date().isoformat(), "end": (now + timedelta(days=1)).date().isoformat()},
-            "five_minute": {"interval": "5m", "start": (now - timedelta(days=59)).date().isoformat(), "end": (now + timedelta(days=1)).date().isoformat()},
+            "hourly": {"interval": "1h", "start": (now - timedelta(days=700)).date().isoformat(), "end": now.date().isoformat()},
+            "five_minute": {"interval": "5m", "start": (now - timedelta(days=55)).date().isoformat(), "end": now.date().isoformat()},
         }
 
         series_id = None
