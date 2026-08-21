@@ -29,6 +29,7 @@ from backend.routers import (
     tradebrain_phase8 as tradebrain_phase8_router,
     tradebrain_phase9 as tradebrain_phase9_router,
     tradebrain_phase10 as tradebrain_phase10_router,
+    tradebrain_evidence as tradebrain_evidence_router,
 )
 from backend.settings_manager import load_api_keys_into_env, apply_llm_config_to_default
 from backend.tradebrain.store import ensure_tradebrain_schema
@@ -41,6 +42,7 @@ from backend.tradebrain.regime_hardening import install_phase4_regime_hardening
 from backend.tradebrain.paper_ledger import ensure_paper_ledger_schema
 from backend.tradebrain.exchange_calendar import ensure_exchange_calendar_schema
 from backend.tradebrain.advisory_store import ensure_advisory_schema
+from backend.tradebrain.evidence_baseline import ensure_evidence_schema
 
 
 @asynccontextmanager
@@ -55,6 +57,7 @@ async def lifespan(app: FastAPI):
     ensure_paper_ledger_schema()
     ensure_exchange_calendar_schema()
     ensure_advisory_schema()
+    ensure_evidence_schema()
     install_phase4_regime_hardening()
     load_api_keys_into_env()
     apply_llm_config_to_default()
@@ -64,7 +67,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Indian Market Trading Agent — Trade Brain Reframe",
     description="Resident-Indian INTRADAY/SWING research with audited evidence, deterministic gating and execution disabled",
-    version="0.11.0",
+    version="0.11.1",
     lifespan=lifespan,
 )
 
@@ -107,6 +110,7 @@ app.include_router(tradebrain_phase7_router.router)
 app.include_router(tradebrain_phase8_router.router)
 app.include_router(tradebrain_phase9_router.router)
 app.include_router(tradebrain_phase10_router.router)
+app.include_router(tradebrain_evidence_router.router)
 
 
 @app.get("/api/health")
@@ -115,7 +119,7 @@ def health():
         "status": "ok",
         "service": "indian-trading-agent",
         "tradebrain_reframe": True,
-        "tradebrain_version": "0.11.0",
+        "tradebrain_version": "0.11.1",
         "trader_profile": "RESIDENT_INDIAN",
         "active_trade_modes": ["INTRADAY", "SWING"],
         "mtf_enabled": False,
@@ -131,6 +135,7 @@ def health():
         "resident_equity_cost_engine": True,
         "net_cost_paper_ledger": True,
         "final_advisory_pipeline": True,
+        "descriptive_evidence_baseline": True,
         "raw_buy_sell_signal_disabled": True,
         "human_approval_required_for_soft_promotion": True,
         "data_credentials_may_be_data_only": True,
