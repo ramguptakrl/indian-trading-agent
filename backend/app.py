@@ -12,7 +12,24 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from backend.db import ensure_db
-from backend.routers import market_data, analysis, watchlist, backtest, strategies, scanner, performance, recommender, settings as settings_router, news as news_router, simulation as simulation_router, insights as insights_router, fii_dii as fii_dii_router, calendar as calendar_router, concentration as concentration_router, daily_verdict as daily_verdict_router, signal_performance as signal_performance_router, verdict_calibration as verdict_calibration_router, regime as regime_router, confidence_calibration as confidence_calibration_router, shadow_trades as shadow_trades_router, memory as memory_router, tradebrain as tradebrain_router, tradebrain_phase3 as tradebrain_phase3_router, tradebrain_phase4 as tradebrain_phase4_router, tradebrain_phase5 as tradebrain_phase5_router, tradebrain_phase6 as tradebrain_phase6_router
+from backend.routers import (
+    market_data, analysis, watchlist, backtest, strategies, scanner, performance,
+    recommender, settings as settings_router, news as news_router,
+    simulation as simulation_router, insights as insights_router, fii_dii as fii_dii_router,
+    calendar as calendar_router, concentration as concentration_router,
+    daily_verdict as daily_verdict_router, signal_performance as signal_performance_router,
+    verdict_calibration as verdict_calibration_router, regime as regime_router,
+    confidence_calibration as confidence_calibration_router, shadow_trades as shadow_trades_router,
+    memory as memory_router, tradebrain as tradebrain_router,
+    tradebrain_phase3 as tradebrain_phase3_router,
+    tradebrain_phase4 as tradebrain_phase4_router,
+    tradebrain_phase5 as tradebrain_phase5_router,
+    tradebrain_phase6 as tradebrain_phase6_router,
+    tradebrain_phase7 as tradebrain_phase7_router,
+    tradebrain_phase8 as tradebrain_phase8_router,
+    tradebrain_phase9 as tradebrain_phase9_router,
+    tradebrain_phase10 as tradebrain_phase10_router,
+)
 from backend.settings_manager import load_api_keys_into_env, apply_llm_config_to_default
 from backend.tradebrain.store import ensure_tradebrain_schema
 from backend.tradebrain.security_store import ensure_security_master_schema
@@ -22,6 +39,8 @@ from backend.tradebrain.focus_lab_store import ensure_focus_lab_schema
 from backend.tradebrain.challenger_store import ensure_challenger_schema
 from backend.tradebrain.regime_hardening import install_phase4_regime_hardening
 from backend.tradebrain.paper_ledger import ensure_paper_ledger_schema
+from backend.tradebrain.exchange_calendar import ensure_exchange_calendar_schema
+from backend.tradebrain.advisory_store import ensure_advisory_schema
 
 
 @asynccontextmanager
@@ -34,6 +53,8 @@ async def lifespan(app: FastAPI):
     ensure_focus_lab_schema()
     ensure_challenger_schema()
     ensure_paper_ledger_schema()
+    ensure_exchange_calendar_schema()
+    ensure_advisory_schema()
     install_phase4_regime_hardening()
     load_api_keys_into_env()
     apply_llm_config_to_default()
@@ -42,8 +63,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Indian Market Trading Agent — Trade Brain Reframe",
-    description="Resident-Indian equity research for INTRADAY and SWING with deterministic advisory-only controls",
-    version="0.7.0",
+    description="Resident-Indian INTRADAY/SWING research with audited evidence, deterministic gating and execution disabled",
+    version="0.11.0",
     lifespan=lifespan,
 )
 
@@ -82,6 +103,10 @@ app.include_router(tradebrain_phase3_router.router)
 app.include_router(tradebrain_phase4_router.router)
 app.include_router(tradebrain_phase5_router.router)
 app.include_router(tradebrain_phase6_router.router)
+app.include_router(tradebrain_phase7_router.router)
+app.include_router(tradebrain_phase8_router.router)
+app.include_router(tradebrain_phase9_router.router)
+app.include_router(tradebrain_phase10_router.router)
 
 
 @app.get("/api/health")
@@ -90,7 +115,7 @@ def health():
         "status": "ok",
         "service": "indian-trading-agent",
         "tradebrain_reframe": True,
-        "tradebrain_version": "0.7.0",
+        "tradebrain_version": "0.11.0",
         "trader_profile": "RESIDENT_INDIAN",
         "active_trade_modes": ["INTRADAY", "SWING"],
         "mtf_enabled": False,
@@ -100,11 +125,17 @@ def health():
         "strict_replay_outcomes": True,
         "focus_instrument_lab": True,
         "frozen_challenger_validation": True,
+        "approved_soft_runtime": True,
+        "verified_exchange_calendar_capability": True,
+        "kite_market_data_only_adapter": True,
         "resident_equity_cost_engine": True,
         "net_cost_paper_ledger": True,
+        "final_advisory_pipeline": True,
+        "raw_buy_sell_signal_disabled": True,
         "human_approval_required_for_soft_promotion": True,
         "data_credentials_may_be_data_only": True,
         "advisory_only": True,
+        "trade_authorization": False,
         "order_execution_enabled": False,
     }
 
