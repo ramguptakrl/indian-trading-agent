@@ -92,9 +92,13 @@ def sync_kite_history_range(
         if idx < len(chunks) - 1 and rate_limit_sleep_seconds:
             time_module.sleep(rate_limit_sleep_seconds)
 
+    first = results[0] if results else {}
     return {
         "status": "SUCCESS" if all(item.get("status") in {"SUCCESS", "EMPTY"} for item in results) else "PARTIAL",
         "source_key": "ZERODHA_KITE_CONNECT_MARKET_DATA_ONLY",
+        "series_id": first.get("series_id"),
+        "interval": first.get("interval"),
+        "price_mode": first.get("price_mode", "RAW_UNADJUSTED"),
         "credential_role": "MARKET_DATA_ONLY",
         "order_api_enabled": False,
         "exchange": exchange.upper(),
