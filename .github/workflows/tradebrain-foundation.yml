@@ -12,6 +12,7 @@ on:
       - "tradingagents/agents/trader/trader.py"
       - "tradingagents/agents/managers/portfolio_manager.py"
       - "tests/test_tradebrain_*.py"
+      - "scripts/tradebrain_phase2_smoke.py"
       - "pyproject.toml"
       - ".github/workflows/tradebrain-foundation.yml"
   push:
@@ -27,6 +28,7 @@ on:
       - "tradingagents/agents/trader/trader.py"
       - "tradingagents/agents/managers/portfolio_manager.py"
       - "tests/test_tradebrain_*.py"
+      - "scripts/tradebrain_phase2_smoke.py"
       - "pyproject.toml"
       - ".github/workflows/tradebrain-foundation.yml"
 
@@ -46,7 +48,11 @@ jobs:
           backend/tradebrain
           backend/routers/tradebrain.py
           backend/app.py
+          scripts/tradebrain_phase2_smoke.py
           tradingagents/agents/trader/trader.py
           tradingagents/agents/managers/portfolio_manager.py
       - name: Run Trade Brain tests
         run: python -m unittest discover -s tests -p "test_tradebrain_*.py" -v
+      - name: Live Phase 2 exchange + attachment smoke (observational)
+        continue-on-error: true
+        run: python scripts/tradebrain_phase2_smoke.py
