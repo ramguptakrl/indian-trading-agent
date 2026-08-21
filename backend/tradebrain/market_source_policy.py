@@ -11,7 +11,8 @@ import os
 from datetime import datetime
 from typing import Any
 
-from backend.tradebrain.kite_data import KITE_SOURCE_KEY, sync_kite_history
+from backend.tradebrain.kite_data import KITE_SOURCE_KEY
+from backend.tradebrain.kite_history_range import sync_kite_history_range
 from backend.tradebrain.market_data import YAHOO_SOURCE_KEY, sync_yahoo_history
 
 KITE_INTERVALS = {
@@ -50,11 +51,8 @@ def market_source_status() -> dict[str, Any]:
         "yahoo_role": "FALLBACK_AND_RESEARCH",
         "automatic_order_execution": False,
         "fallback_is_always_labelled": True,
+        "historical_long_ranges_are_chunked": True,
     }
-
-
-def _dateish(value: str | datetime) -> str | datetime:
-    return value
 
 
 def sync_preferred_history(
@@ -76,7 +74,7 @@ def sync_preferred_history(
         if normalized not in KITE_INTERVALS:
             raise ValueError(f"Interval {interval} is not supported by the Kite adapter")
         try:
-            result = sync_kite_history(
+            result = sync_kite_history_range(
                 exchange=exchange,
                 symbol=symbol,
                 interval=KITE_INTERVALS[normalized],
@@ -105,8 +103,8 @@ def sync_preferred_history(
         exchange=exchange,
         symbol=symbol,
         interval=YAHOO_INTERVALS[normalized],
-        start=_dateish(from_time),
-        end=_dateish(to_time),
+        start=from_time,
+        end=to_time,
         incremental=False,
         db_path=db_path,
     )
