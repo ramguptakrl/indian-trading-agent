@@ -6,6 +6,7 @@ on:
       - "backend/tradebrain/**"
       - "backend/routers/tradebrain.py"
       - "backend/routers/tradebrain_phase3.py"
+      - "backend/routers/tradebrain_phase4.py"
       - "backend/routers/recommender.py"
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
@@ -15,6 +16,7 @@ on:
       - "tests/test_tradebrain_*.py"
       - "scripts/tradebrain_phase2_smoke.py"
       - "scripts/tradebrain_phase3_smoke.py"
+      - "scripts/tradebrain_phase4_smoke.py"
       - "pyproject.toml"
       - ".github/workflows/tradebrain-foundation.yml"
   push:
@@ -24,6 +26,7 @@ on:
       - "backend/tradebrain/**"
       - "backend/routers/tradebrain.py"
       - "backend/routers/tradebrain_phase3.py"
+      - "backend/routers/tradebrain_phase4.py"
       - "backend/routers/recommender.py"
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
@@ -33,6 +36,7 @@ on:
       - "tests/test_tradebrain_*.py"
       - "scripts/tradebrain_phase2_smoke.py"
       - "scripts/tradebrain_phase3_smoke.py"
+      - "scripts/tradebrain_phase4_smoke.py"
       - "pyproject.toml"
       - ".github/workflows/tradebrain-foundation.yml"
 
@@ -58,9 +62,11 @@ jobs:
           backend/tradebrain
           backend/routers/tradebrain.py
           backend/routers/tradebrain_phase3.py
+          backend/routers/tradebrain_phase4.py
           backend/app.py
           scripts/tradebrain_phase2_smoke.py
           scripts/tradebrain_phase3_smoke.py
+          scripts/tradebrain_phase4_smoke.py
           tradingagents/agents/trader/trader.py
           tradingagents/agents/managers/portfolio_manager.py
       - name: Run Trade Brain tests
@@ -71,3 +77,6 @@ jobs:
       - name: Live Phase 3 market-data + replay smoke (observational)
         continue-on-error: true
         run: python scripts/tradebrain_phase3_smoke.py
+      - name: Live Phase 4 strict outcome + focus lab smoke (observational)
+        continue-on-error: true
+        run: python scripts/tradebrain_phase4_smoke.py
