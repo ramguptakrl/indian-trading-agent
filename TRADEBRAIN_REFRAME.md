@@ -1,6 +1,6 @@
 # Trade Brain Reframe for `indian-trading-agent`
 
-Status: foundation implementation
+Status: foundation + Phase 1 security-master implementation
 
 This file is the canonical architectural bridge between the existing Indian Trading Agent repository and the prior Trade Brain / BSE Engine work. It intentionally removes historical troubleshooting logs, retired L1/L2/L3 rescue-cycle details, local Windows paths, screenshots, and milestone-by-milestone chat continuity text. Those were useful during development but should not become product architecture.
 
@@ -99,9 +99,9 @@ Official/reference collectors should preserve where practical:
 - fetch timestamp;
 - raw payload/archive path;
 - SHA-256;
-- normalization/parser version later.
+- normalization/parser version.
 
-Raw payload should be archived before normalization where practical so decisions can be reproduced.
+Raw payload is archived before normalization in the Phase 1 security-master collectors so an import can be reproduced or replayed.
 
 ### 3.5 Hard rules sit above AI
 
@@ -216,7 +216,7 @@ The current foundation uses weekday/clock logic only. A verified NSE/BSE trading
 
 ### Security identity
 
-Official exchange/security-master data + ISIN mapping.
+Official exchange/security-master data + ISIN mapping. Phase 1 now ingests official NSE/BSE equity masters into a persistent local identity model.
 
 ### Corporate events / regulation
 
@@ -234,7 +234,7 @@ Verified broker documentation/API behaviour. Do not let an LLM invent margin, co
 
 Interpretation, synthesis, research planning, hypothesis generation, debate and explanation.
 
-## 8. Implemented in this foundation branch
+## 8. Implemented in this branch
 
 - `backend/tradebrain/policy.py`
   - deterministic hard-rule arbiter;
@@ -256,34 +256,83 @@ Interpretation, synthesis, research planning, hypothesis generation, debate and 
 - `backend/tradebrain/provenance.py`
   - SHA-256 helpers and standard provenance record.
 
+- `backend/tradebrain/store.py`
+  - namespaced `tb_*` issuer/security/listing/source/raw-artifact/plan tables;
+  - persistent plan evaluations and outcomes.
+
+- `backend/tradebrain/security_store.py`
+  - non-destructive metadata columns for official security masters;
+  - one-transaction bulk upsert;
+  - idempotency counters;
+  - cross-exchange ISIN-match statistics;
+  - exact listing and ISIN lookups;
+  - missing-from-refresh does not imply delisted.
+
+- `backend/tradebrain/security_master.py`
+  - official NSE `EQUITY_L.csv` collector;
+  - official BSE active-equity scrip-list collector;
+  - browser-like transport/referer handling;
+  - raw payload archive before parsing;
+  - SHA-256 + parser-version provenance;
+  - tolerant NSE CSV and BSE JSON parsing;
+  - explicit invalid/missing-ISIN rejection sample;
+  - safe ISIN-only cross-exchange identity.
+
 - `backend/tradebrain/soft_evidence.py`
   - compatibility annotation for legacy score-derived probabilities;
   - Daily Verdict marked as soft context only.
 
 - `backend/routers/tradebrain.py`
-  - doctrine API;
-  - operating-mode API;
-  - deterministic plan-validation API;
-  - identity-validation API;
+  - doctrine and operating-mode APIs;
+  - deterministic plan validation/outcome APIs;
+  - exact identity APIs;
+  - NSE/BSE/all security-master refresh APIs;
+  - security-master statistics API;
   - roadmap API.
 
-- existing recommender and Daily Verdict endpoints remain backwards compatible but now expose Trade Brain warnings/metadata.
+- existing recommender and Daily Verdict endpoints remain backwards compatible but expose Trade Brain warnings/metadata.
 
-## 9. Next implementation sequence
+### Phase 1 endpoints
+
+```text
+POST /api/tradebrain/security-master/nse
+POST /api/tradebrain/security-master/bse
+POST /api/tradebrain/security-master/refresh
+GET  /api/tradebrain/security-master/stats
+GET  /api/tradebrain/identity/isin/{isin}
+GET  /api/tradebrain/identity/listing/{exchange}/{symbol}
+```
+
+The collector output reports received/valid/rejected rows, inserted/updated listings, newly created canonical securities, provenance/artifact identity and a rejected-row sample. Repeating the same master updates existing listings instead of duplicating them.
+
+## 9. Implementation sequence
 
 ### Phase A — official security master + persisted identity
 
-Build incremental collectors for NSE and BSE security masters and persist:
+**STATUS: IMPLEMENTED IN CODE; LIVE EXCHANGE TRANSPORT STILL REQUIRES RUNTIME VALIDATION.**
 
-- issuer/company entities;
+Implemented:
+
+- issuer entities created deterministically per verified ISIN;
 - canonical securities by ISIN;
-- exchange listings;
-- aliases/classifications;
-- raw source archive + hash;
-- idempotent upsert;
-- explicit rejected-row log.
+- NSE listings keyed by NSE symbol;
+- BSE listings keyed by stable six-digit scrip code with BSE `scrip_id` preserved separately;
+- NSE series/industry metadata and BSE group/industry metadata where supplied;
+- raw source archive + SHA-256 + parser version;
+- idempotent bulk upsert;
+- explicit rejected-row sample for missing/invalid identity;
+- exact ISIN/listing lookup APIs;
+- cross-exchange match counts;
+- safe rule that source absence does not prove delisting.
 
-Do this before fuzzy company intelligence is allowed to merge entities.
+Not silently added:
+
+- fuzzy issuer merging;
+- automatic alias merging by similar company name;
+- inferred delisting/suspension from absence;
+- live broker identity substitution.
+
+Verified CIN/LEI/company relationships and richer aliases/classifications can be added later without weakening the ISIN rule.
 
 ### Phase B — corporate events and document memory
 
