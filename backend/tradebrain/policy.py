@@ -28,14 +28,11 @@ CrashGuardState = Literal["NORMAL", "ELEVATED", "SEVERE"]
 
 INTRADAY_NO_FRESH_ENTRY = time(15, 10)
 INTRADAY_HARD_EXIT = time(15, 15)
-# Backward-compatible exported names used by earlier tests/callers.
 DAY_NO_FRESH_ENTRY = INTRADAY_NO_FRESH_ENTRY
 DAY_HARD_EXIT = INTRADAY_HARD_EXIT
 
 
 class TradePlan(BaseModel):
-    """Structured candidate sent to the deterministic policy gate."""
-
     ticker: str = Field(min_length=1)
     exchange: Literal["NSE", "BSE"] = "NSE"
     mode: TradeMode
@@ -52,13 +49,10 @@ class TradePlan(BaseModel):
     @field_validator("mode", mode="before")
     @classmethod
     def normalize_mode_for_legacy_replay_storage(cls, value: str) -> str:
-        # New callers speak INTRADAY/SWING; prior replay code stores DAY/SWING_POSITION.
         return to_legacy_mode(value)
 
 
 class GateResult(BaseModel):
-    """Policy decision. `advisory_only` is always true by design."""
-
     allowed_for_advisory: bool
     action: Literal["PASS", "WAIT", "BLOCK", "HARD_EXIT"]
     active_mode: Literal["INTRADAY", "SWING"]
@@ -93,12 +87,6 @@ def _reward_risk(plan: TradePlan) -> float | None:
 
 
 def evaluate_trade_plan(plan: TradePlan) -> GateResult:
-    """Apply immutable/user-controlled rules before any trade guidance is trusted.
-
-    Soft preferences (for example INTRADAY >= 1:1 and SWING around 1:3) create
-    warnings, not silent hard rules. They can be challenged with replay data.
-    """
-
     failures: list[str] = []
     warnings: list[str] = []
     now = _now_ist(plan.evaluated_at_ist)
@@ -112,7 +100,7 @@ def evaluate_trade_plan(plan: TradePlan) -> GateResult:
             failures.append("SHORT requires take_profit < entry < stop_loss")
 
     if active_mode == "SWING" and plan.direction == "SHORT":
-        failures.append("SWING short is not allowed in the active cash-equity architecture")
+        failures.append("SWING (legacy SWING_POSITION) short is not allowed in the active cash-equity architecture")
 
     if not plan.broker_allows_trade:
         failures.append("Broker/exchange rule does not allow this trade")
