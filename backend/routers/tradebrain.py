@@ -1,12 +1,22 @@
 """Trade Brain architecture, policy, identity, and evidence-store API."""
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.tradebrain import TRADEBRAIN_VERSION
 from backend.tradebrain.identity import ExchangeListing, validate_listing_identity
 from backend.tradebrain.policy import TradePlan, evaluate_trade_plan
 from backend.tradebrain.schedule import get_operating_mode
+from backend.tradebrain.security_master import (
+    collect_all_security_masters,
+    collect_bse_security_master,
+    collect_nse_security_master,
+)
+from backend.tradebrain.security_store import (
+    get_exchange_listing,
+    get_identity_by_isin,
+    security_master_stats,
+)
 from backend.tradebrain.store import (
     record_plan_evaluation,
     record_plan_outcome,
@@ -132,6 +142,51 @@ def persist_identity(data: IdentityUpsertRequest):
     )
 
 
+@router.get("/identity/isin/{isin}")
+def identity_by_isin(isin: str):
+    result = get_identity_by_isin(isin)
+    if result is None:
+        raise HTTPException(status_code=404, detail="ISIN not found in Trade Brain identity store")
+    return result
+
+
+@router.get("/identity/listing/{exchange}/{symbol}")
+def identity_by_listing(exchange: str, symbol: str):
+    exchange = exchange.upper()
+    if exchange not in {"NSE", "BSE"}:
+        raise HTTPException(status_code=400, detail="exchange must be NSE or BSE")
+    result = get_exchange_listing(exchange, symbol)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Exchange listing not found")
+    return result
+
+
+@router.post("/security-master/nse")
+def refresh_nse_security_master(timeout: int = Query(30, ge=5, le=120)):
+    try:
+        return collect_nse_security_master(timeout=timeout)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"NSE security-master collection failed: {type(exc).__name__}: {exc}") from exc
+
+
+@router.post("/security-master/bse")
+def refresh_bse_security_master(timeout: int = Query(30, ge=5, le=120)):
+    try:
+        return collect_bse_security_master(timeout=timeout)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"BSE security-master collection failed: {type(exc).__name__}: {exc}") from exc
+
+
+@router.post("/security-master/refresh")
+def refresh_all_security_masters(timeout: int = Query(30, ge=5, le=120)):
+    return collect_all_security_masters(timeout=timeout)
+
+
+@router.get("/security-master/stats")
+def get_security_master_stats():
+    return security_master_stats()
+
+
 @router.get("/store/stats")
 def get_store_stats():
     return store_stats()
@@ -140,17 +195,18 @@ def get_store_stats():
 @router.get("/roadmap")
 def roadmap():
     return {
-        "completed_in_reframe_foundation": [
+        "completed": [
             "deterministic hard-rule gate",
             "market/study operating-mode scheduler",
             "ISIN-first identity primitives",
             "persistent issuer/security/listing tables",
             "provenance hashing + raw-artifact registry",
+            "official NSE/BSE equity security-master collectors",
+            "idempotent official-master upserts and identity lookup APIs",
             "persistent structured plan evaluations and outcomes",
             "soft-evidence annotations for legacy heuristic outputs",
         ],
         "next": [
-            "official NSE/BSE security-master collectors feeding the persisted identity layer",
             "corporate-event and attachment archive with hashing/idempotency",
             "audited OHLCV store and derived multi-timeframe candles",
             "automatic TP-first/SL-first/MAE/MFE/time-to-event outcome backfill",
