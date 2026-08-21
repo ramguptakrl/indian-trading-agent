@@ -30,6 +30,7 @@ from backend.routers import (
     tradebrain_phase9 as tradebrain_phase9_router,
     tradebrain_phase10 as tradebrain_phase10_router,
     tradebrain_evidence as tradebrain_evidence_router,
+    tradebrain_actual_trades as tradebrain_actual_trades_router,
 )
 from backend.settings_manager import load_api_keys_into_env, apply_llm_config_to_default
 from backend.tradebrain.store import ensure_tradebrain_schema
@@ -45,6 +46,7 @@ from backend.tradebrain.advisory_store import ensure_advisory_schema
 from backend.tradebrain.evidence_baseline import ensure_evidence_schema
 from backend.tradebrain.prospective_gap import ensure_prospective_gap_schema
 from backend.tradebrain.kite_stream import ensure_kite_live_schema
+from backend.tradebrain.actual_trade_journal import ensure_actual_trade_schema
 from backend.tradebrain.market_source_policy import market_source_status
 
 
@@ -63,6 +65,7 @@ async def lifespan(app: FastAPI):
     ensure_evidence_schema()
     ensure_prospective_gap_schema()
     ensure_kite_live_schema()
+    ensure_actual_trade_schema()
     install_phase4_regime_hardening()
     load_api_keys_into_env()
     apply_llm_config_to_default()
@@ -72,7 +75,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Indian Market Trading Agent — Trade Brain Reframe",
     description="Resident-Indian INTRADAY/SWING research with audited evidence, deterministic gating and execution disabled",
-    version="0.12.0",
+    version="0.12.1",
     lifespan=lifespan,
 )
 
@@ -116,6 +119,7 @@ app.include_router(tradebrain_phase8_router.router)
 app.include_router(tradebrain_phase9_router.router)
 app.include_router(tradebrain_phase10_router.router)
 app.include_router(tradebrain_evidence_router.router)
+app.include_router(tradebrain_actual_trades_router.router)
 
 
 @app.get("/api/health")
@@ -124,7 +128,7 @@ def health():
         "status": "ok",
         "service": "indian-trading-agent",
         "tradebrain_reframe": True,
-        "tradebrain_version": "0.12.0",
+        "tradebrain_version": "0.12.1",
         "trader_profile": "RESIDENT_INDIAN",
         "active_trade_modes": ["INTRADAY", "SWING"],
         "mtf_enabled": False,
@@ -142,6 +146,9 @@ def health():
         "market_source_preference": market_source_status(),
         "resident_equity_cost_engine": True,
         "net_cost_paper_ledger": True,
+        "actual_manual_trade_journal": True,
+        "actual_trades_link_to_advisory_snapshot": True,
+        "actual_trade_partial_close": True,
         "final_advisory_pipeline": True,
         "descriptive_evidence_baseline": True,
         "prospective_hypothesis_collection": True,
