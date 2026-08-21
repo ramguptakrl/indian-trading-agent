@@ -11,7 +11,13 @@ import os
 import sys
 import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
+
+# Running `python scripts/...py` otherwise places only `scripts/` on sys.path.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from backend.tradebrain.corporate_event_store import list_events
 from backend.tradebrain.corporate_events import (
