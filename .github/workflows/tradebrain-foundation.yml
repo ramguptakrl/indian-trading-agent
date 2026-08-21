@@ -9,7 +9,9 @@ on:
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
       - "tradingagents/default_config.py"
-      - "tests/test_tradebrain_foundation.py"
+      - "tradingagents/agents/trader/trader.py"
+      - "tradingagents/agents/managers/portfolio_manager.py"
+      - "tests/test_tradebrain_*.py"
       - ".github/workflows/tradebrain-foundation.yml"
   push:
     branches:
@@ -21,7 +23,9 @@ on:
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
       - "tradingagents/default_config.py"
-      - "tests/test_tradebrain_foundation.py"
+      - "tradingagents/agents/trader/trader.py"
+      - "tradingagents/agents/managers/portfolio_manager.py"
+      - "tests/test_tradebrain_*.py"
       - ".github/workflows/tradebrain-foundation.yml"
 
 jobs:
@@ -34,5 +38,13 @@ jobs:
           python-version: "3.11"
       - name: Install minimal test dependencies
         run: python -m pip install "pydantic>=2,<3" "requests>=2.32"
-      - name: Run Trade Brain foundation tests
-        run: python -m unittest discover -s tests -p "test_tradebrain_foundation.py" -v
+      - name: Compile Trade Brain integration files
+        run: >-
+          python -m compileall -q
+          backend/tradebrain
+          backend/routers/tradebrain.py
+          backend/app.py
+          tradingagents/agents/trader/trader.py
+          tradingagents/agents/managers/portfolio_manager.py
+      - name: Run Trade Brain tests
+        run: python -m unittest discover -s tests -p "test_tradebrain_*.py" -v
