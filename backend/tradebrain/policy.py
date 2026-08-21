@@ -5,7 +5,9 @@ module is the final deterministic gate for a structured trade plan. It deliberat
 does not place orders and cannot be overridden by an LLM response.
 
 Phase 6 active product modes are INTRADAY and SWING. Historical DAY and
-SWING_POSITION values remain accepted as compatibility aliases only.
+SWING_POSITION values remain accepted as compatibility aliases only. TradePlan
+normalizes active labels to the legacy storage labels so Phases 0-5 replay rows stay
+compatible without destructive migration; GateResult exposes the active label.
 """
 
 from __future__ import annotations
@@ -14,9 +16,9 @@ from datetime import datetime, time
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from backend.tradebrain.trade_modes import CompatibleTradeMode, to_active_mode
+from backend.tradebrain.trade_modes import CompatibleTradeMode, to_active_mode, to_legacy_mode
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -46,6 +48,12 @@ class TradePlan(BaseModel):
     broker_allows_trade: bool = True
     evidence: list[str] = Field(default_factory=list)
     evaluated_at_ist: datetime | None = None
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def normalize_mode_for_legacy_replay_storage(cls, value: str) -> str:
+        # New callers speak INTRADAY/SWING; prior replay code stores DAY/SWING_POSITION.
+        return to_legacy_mode(value)
 
 
 class GateResult(BaseModel):
@@ -96,7 +104,6 @@ def evaluate_trade_plan(plan: TradePlan) -> GateResult:
     now = _now_ist(plan.evaluated_at_ist)
     active_mode = to_active_mode(plan.mode)
 
-    # Mandatory TP/SL geometry.
     if plan.direction == "LONG":
         if not (plan.stop_loss < plan.entry < plan.take_profit):
             failures.append("LONG requires stop_loss < entry < take_profit")
@@ -104,19 +111,15 @@ def evaluate_trade_plan(plan: TradePlan) -> GateResult:
         if not (plan.take_profit < plan.entry < plan.stop_loss):
             failures.append("SHORT requires take_profit < entry < stop_loss")
 
-    # Active resident equity product boundary: overnight SWING is LONG-only.
     if active_mode == "SWING" and plan.direction == "SHORT":
         failures.append("SWING short is not allowed in the active cash-equity architecture")
 
-    # Broker/exchange restrictions, once known, outrank model opinions.
     if not plan.broker_allows_trade:
         failures.append("Broker/exchange rule does not allow this trade")
 
-    # Crash Guard gates exposure; a crash signal never creates an automatic short.
     if plan.crash_guard == "SEVERE" and plan.direction == "LONG":
         failures.append("Severe Crash Guard blocks fresh LONG exposure")
 
-    # User hard clock: no fresh INTRADAY entries from 15:10; flat before 15:15.
     if active_mode == "INTRADAY":
         clock = now.timetz().replace(tzinfo=None)
         if clock >= INTRADAY_HARD_EXIT:
