@@ -100,7 +100,7 @@ def evaluate_trade_plan(plan: TradePlan) -> GateResult:
             failures.append("SHORT requires take_profit < entry < stop_loss")
 
     if active_mode == "SWING" and plan.direction == "SHORT":
-        failures.append("SWING (legacy SWING_POSITION) short is not allowed in the active cash-equity architecture")
+        failures.append("SWING_POSITION short is not allowed; active mode SWING is LONG cash/delivery equity only")
 
     if not plan.broker_allows_trade:
         failures.append("Broker/exchange rule does not allow this trade")
