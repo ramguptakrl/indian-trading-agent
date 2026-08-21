@@ -113,6 +113,25 @@ def _clean(value: Any) -> str | None:
     return text or None
 
 
+def _truthy_flag(value: Any) -> bool:
+    """Interpret exchange booleans without Python's truthy-string trap."""
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value).strip().casefold()
+    if text in {"", "0", "false", "f", "no", "n", "null", "none"}:
+        return False
+    if text in {"1", "true", "t", "yes", "y"}:
+        return True
+    try:
+        return float(text) != 0
+    except ValueError:
+        return False
+
+
 def _parse_timestamp(value: Any, *, assume_ist: bool = True) -> str | None:
     raw = _clean(value)
     if not raw:
@@ -320,7 +339,7 @@ def parse_bse_announcements(payload: bytes, *, raw_artifact_id: str | None = Non
         source_category = _clean(row.get("CATEGORYNAME") or row.get("ANNOUNCEMENT_TYPE"))
         subcategory = _clean(row.get("SUBCATNAME"))
         company = _clean(row.get("SLONGNAME"))
-        source_critical = bool(row.get("CRITICALNEWS"))
+        source_critical = _truthy_flag(row.get("CRITICALNEWS"))
         attachment_name = _clean(row.get("ATTACHMENTNAME"))
         attachment_url = f"{BSE_ATTACHMENT_BASE}{attachment_name}" if attachment_name else None
 
