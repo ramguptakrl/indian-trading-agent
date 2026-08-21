@@ -30,17 +30,12 @@ export default function AnalysisPage() {
 function AnalysisPageInner() {
   const searchParams = useSearchParams();
   const defaultTicker = searchParams.get("ticker") || "";
-
-  // Global store — survives page navigation
   const analysis = useAnalysisStore();
 
-  // Local input state (pre-filled from URL or last analysis ticker)
   const [tickerInput, setTickerInput] = useState(defaultTicker || analysis.ticker || "");
   const [tradeDateInput, setTradeDateInput] = useState(
     analysis.tradeDate || new Date().toISOString().split("T")[0]
   );
-
-  // Analysis options
   const [selectedAnalysts, setSelectedAnalysts] = useState<string[]>([
     "market", "social", "news", "fundamentals",
   ]);
@@ -65,7 +60,9 @@ function AnalysisPageInner() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Run Analysis</h1>
-          <p className="text-sm text-muted-foreground">Multi-agent AI analysis for Indian market stocks</p>
+          <p className="text-sm text-muted-foreground">
+            Multi-agent research feeding the deterministic Trade Brain advisory gate
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setCalcOpen(true)}>
@@ -81,7 +78,6 @@ function AnalysisPageInner() {
         </div>
       </div>
 
-      {/* Input Section */}
       <Card className="overflow-visible">
         <CardContent className="p-4 overflow-visible">
           <div className="flex gap-3 items-end">
@@ -124,7 +120,6 @@ function AnalysisPageInner() {
         </CardContent>
       </Card>
 
-      {/* Customization Options */}
       <AnalysisOptions
         analysts={selectedAnalysts}
         onAnalystsChange={setSelectedAnalysts}
@@ -135,14 +130,12 @@ function AnalysisPageInner() {
         disabled={analysis.status === "running"}
       />
 
-      {/* Error */}
       {analysis.error && (
         <Card className="border-red-500/30 bg-red-500/5">
           <CardContent className="p-4 text-red-400">{analysis.error}</CardContent>
         </Card>
       )}
 
-      {/* Live Heartbeat */}
       {analysis.status === "running" && analysis.heartbeat && (
         <Card className="border-blue-200 bg-blue-50/50">
           <CardContent className="p-3">
@@ -160,28 +153,26 @@ function AnalysisPageInner() {
         </Card>
       )}
 
-      {/* Decision Card */}
       {analysis.signal && (
-        <DecisionCard signal={analysis.signal} ticker={displayTicker} duration={analysis.duration} />
+        <DecisionCard
+          signal={analysis.signal}
+          ticker={displayTicker}
+          duration={analysis.duration}
+          advisory={analysis.tradebrainAdvisory}
+        />
       )}
 
-      {/* Stats Card */}
       {analysis.stats && analysis.status === "completed" && (
         <StatsCard stats={analysis.stats} duration={analysis.duration} />
       )}
 
-      {/* Main Content */}
       {(analysis.status === "running" || analysis.status === "completed") && (
         <div className="grid grid-cols-4 gap-6">
-          {/* Left: Agent Progress */}
           <div className="col-span-1">
             <AgentProgress reports={analysis.reports} signal={analysis.signal} status={analysis.status} />
           </div>
-
-          {/* Right: Reports */}
           <div className="col-span-3 space-y-4">
             <ReportPanel reports={analysis.reports} />
-
             <DebateView
               bull={analysis.debates.bull}
               bear={analysis.debates.bear}
@@ -193,14 +184,12 @@ function AnalysisPageInner() {
         </div>
       )}
 
-      {/* Help */}
-      {/* Next Step */}
       {analysis.status === "completed" && analysis.signal && (
         <NextStep
-          title="Track this trade"
-          description="After you take the trade and it closes, log your actual P&L in My Trades to build your track record"
+          title="Review or log the outcome"
+          description="This analysis is advisory research, not an order. If you independently act on a candidate, you can later log the observed outcome for research and learning."
           href="/history"
-          buttonText="My Trades"
+          buttonText="Analysis History"
           icon={History}
         />
       )}
