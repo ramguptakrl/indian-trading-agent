@@ -49,18 +49,26 @@ DEFAULT_CONFIG = {
         "FII DII activity Indian markets",
         "India rupee forex exchange rate",
     ],
-    # === Kite API Settings (Phase 4) ===
+    # === Trade Brain policy layer ===
+    # LLMs/scanners are evidence generators. They never authorize or place an order.
+    "advisory_only": True,
+    "order_execution_enabled": False,
+    "dry_run": True,
+    "day_no_fresh_entry": "15:10",
+    "day_hard_exit": "15:15",
+    "swing_position_long_only": True,
+    "require_structured_tp_sl": True,
+    "heuristic_probability_is_learned": False,
+    # === Kite API Settings (future broker/data adapter work) ===
     "kite_api_key": None,
     "kite_api_secret": None,
     "kite_access_token": None,
-    # === Order Management Safety (Phase 4) ===
-    "order_execution_enabled": False,
-    "dry_run": True,
-    "max_position_value": 100000,  # INR
-    "max_loss_per_trade": 5000,  # INR
-    "max_daily_loss": 20000,  # INR
+    # === Order Management Safety (kept dormant while advisory-only) ===
+    "max_position_value": 100000,  # INR, provisional until user-defined portfolio policy
+    "max_loss_per_trade": 5000,  # INR, provisional until user-defined portfolio policy
+    "max_daily_loss": 20000,  # INR, provisional until user-defined portfolio policy
     "max_open_positions": 5,
     "require_stop_loss": True,
-    "allowed_exchanges": ["NSE"],
+    "allowed_exchanges": ["NSE", "BSE"],
     "allowed_products": ["MIS", "CNC"],
 }
