@@ -43,6 +43,7 @@ from backend.tradebrain.paper_ledger import ensure_paper_ledger_schema
 from backend.tradebrain.exchange_calendar import ensure_exchange_calendar_schema
 from backend.tradebrain.advisory_store import ensure_advisory_schema
 from backend.tradebrain.evidence_baseline import ensure_evidence_schema
+from backend.tradebrain.prospective_gap import ensure_prospective_gap_schema
 
 
 @asynccontextmanager
@@ -58,6 +59,7 @@ async def lifespan(app: FastAPI):
     ensure_exchange_calendar_schema()
     ensure_advisory_schema()
     ensure_evidence_schema()
+    ensure_prospective_gap_schema()
     install_phase4_regime_hardening()
     load_api_keys_into_env()
     apply_llm_config_to_default()
@@ -136,6 +138,8 @@ def health():
         "net_cost_paper_ledger": True,
         "final_advisory_pipeline": True,
         "descriptive_evidence_baseline": True,
+        "prospective_hypothesis_collection": True,
+        "prospective_gap_freeze_date": "2026-08-21",
         "raw_buy_sell_signal_disabled": True,
         "human_approval_required_for_soft_promotion": True,
         "data_credentials_may_be_data_only": True,
