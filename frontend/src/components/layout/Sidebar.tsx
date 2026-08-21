@@ -16,6 +16,7 @@ import {
   TrendingUp,
   Newspaper,
   Brain,
+  BriefcaseBusiness,
 } from "lucide-react";
 
 type NavItem = {
@@ -39,7 +40,7 @@ const navGroups: NavGroup[] = [
   {
     title: "DISCOVER",
     items: [
-      { href: "/recommendations", label: "Top Picks", icon: Sparkles, hint: "AI-free recommendations" },
+      { href: "/recommendations", label: "Top Picks", icon: Sparkles, hint: "Research recommendations" },
       { href: "/scanner", label: "Market Scan", icon: Radar, hint: "Gap / Volume / Breakout" },
       { href: "/strategies", label: "Strategies", icon: Target, hint: "S/R, Cyclical patterns" },
       { href: "/news", label: "News Feed", icon: Newspaper, hint: "RSS + customizable" },
@@ -48,23 +49,29 @@ const navGroups: NavGroup[] = [
   {
     title: "ANALYZE",
     items: [
-      { href: "/analysis", label: "Deep Analysis", icon: Search, hint: "AI-powered (paid)" },
-      { href: "/charts", label: "Charts", icon: CandlestickChart, hint: "Candlestick charts" },
+      { href: "/analysis", label: "Deep Analysis", icon: Search, hint: "AI research + Trade Brain gate" },
+      { href: "/charts", label: "Charts", icon: CandlestickChart, hint: "Audited price path" },
+    ],
+  },
+  {
+    title: "TRACK",
+    items: [
+      { href: "/trades", label: "Actual Trades", icon: BriefcaseBusiness, hint: "Trades you really took" },
+      { href: "/history", label: "Analysis Outcomes", icon: History, hint: "Observed research outcomes" },
     ],
   },
   {
     title: "VALIDATE",
     items: [
-      { href: "/performance", label: "Performance", icon: Award, hint: "Strategy win rates" },
+      { href: "/performance", label: "Performance", icon: Award, hint: "Strategy evidence" },
       { href: "/simulation", label: "Simulation", icon: FlaskConical, hint: "Paper trade + backtest" },
-      { href: "/insights", label: "Learning Insights", icon: Brain, hint: "What works for YOU" },
-      { href: "/signals", label: "Signal Performance", icon: TrendingUp, hint: "Auto-tune recommender weights" },
-      { href: "/verdict-calibration", label: "Verdict Calibration", icon: Target, hint: "Is the daily verdict accurate?" },
-      { href: "/confidence-calibration", label: "Confidence Calibration", icon: Award, hint: "Brier score: are probabilities honest?" },
-      { href: "/shadow-trades", label: "Shadow Trades", icon: Search, hint: "Counterfactual: trades you skipped" },
-      { href: "/memory-admin", label: "Memory Admin", icon: Brain, hint: "Inspect + prune agent BM25 memories" },
-      { href: "/backtest", label: "AI Backtest", icon: FlaskConical, hint: "AI on past dates (paid)" },
-      { href: "/history", label: "My Trades", icon: History, hint: "Real trades & P&L" },
+      { href: "/insights", label: "Learning Insights", icon: Brain, hint: "Evidence summaries" },
+      { href: "/signals", label: "Signal Performance", icon: TrendingUp, hint: "Legacy heuristic evidence" },
+      { href: "/verdict-calibration", label: "Verdict Calibration", icon: Target, hint: "Legacy verdict evidence" },
+      { href: "/confidence-calibration", label: "Confidence Calibration", icon: Award, hint: "Probability calibration" },
+      { href: "/shadow-trades", label: "Shadow Trades", icon: Search, hint: "Counterfactual skipped trades" },
+      { href: "/memory-admin", label: "Memory Admin", icon: Brain, hint: "Inspect + prune agent memories" },
+      { href: "/backtest", label: "AI Backtest", icon: FlaskConical, hint: "AI research on past dates" },
     ],
   },
   {
@@ -83,8 +90,8 @@ export function Sidebar() {
         <div className="flex items-center gap-2">
           <TrendingUp className="h-6 w-6 text-green-500" />
           <div>
-            <h1 className="font-bold text-lg">Trading Agent</h1>
-            <p className="text-xs text-muted-foreground">NSE/BSE - Indian Market</p>
+            <h1 className="font-bold text-lg">Trade Brain</h1>
+            <p className="text-xs text-muted-foreground">NSE/BSE · INTRADAY + SWING</p>
           </div>
         </div>
       </div>
@@ -129,8 +136,9 @@ export function Sidebar() {
 
       <div className="p-4 border-t border-border">
         <div className="text-[10px] text-muted-foreground">
-          <p>Powered by Claude + LangGraph</p>
-          <p className="mt-0.5">Data: yfinance (NSE)</p>
+          <p>Trade Brain advisory only</p>
+          <p className="mt-0.5">Price: Kite-primary · audited fallback</p>
+          <p className="mt-0.5">Broker order execution: OFF</p>
         </div>
       </div>
     </aside>
