@@ -58,6 +58,20 @@ Fail closed when required deterministic state is unknown.
 - Legacy recommender scores/probabilities remain heuristic/non-authorizing evidence.
 - Prospective hypotheses must not backfill pre-freeze observations into validation.
 
+## Actual manual trade boundary
+
+`ACTUAL_MANUAL_TRADE` is a separate evidence class representing what the human actually executed at a broker.
+
+- Never merge actual manual trades into hypothetical replay or paper-ledger records.
+- An actual trade may link to an advisory, and the exact advisory snapshot must remain frozen with that record.
+- If the human's actual direction differs from the linked advisory, preserve the mismatch; do not rewrite either history.
+- Actual entry/exit price, quantity and timestamps are user-recorded broker fills.
+- Partial exits must preserve each exit slice rather than averaging away execution history.
+- Resident transaction charges may be estimated until a user supplies an actual broker charge override; do not label estimates as broker-confirmed charges.
+- Policy/time violations on a real trade are recorded as observations, not used to erase or reject the fact that the trade occurred.
+- UI actions such as `I TOOK THIS TRADE`, `OPEN`, `PARTIAL CLOSE`, and `CLOSE TRADE` mutate the local journal only. They do not send broker orders.
+- Read-only future broker reconciliation may verify journal records, but it must not silently become order execution.
+
 ## Data boundary
 
 - Preserve raw source evidence, SHA-256 provenance and source identity.
@@ -105,6 +119,7 @@ Always expose that:
 - `trade_authorization=false`
 - `order_execution_allowed=false`
 
+The Actual Trades screen may say OPEN/CLOSED because those are journal states, but it must also state that broker execution is manual and external.
 Historical upstream `BUY/SELL/HOLD` records may be rendered for compatibility but must be clearly treated as legacy/non-authorizing.
 
 ## Validation
