@@ -13,6 +13,7 @@ on:
       - "backend/routers/tradebrain_phase8.py"
       - "backend/routers/tradebrain_phase9.py"
       - "backend/routers/tradebrain_phase10.py"
+      - "backend/routers/tradebrain_evidence.py"
       - "backend/routers/analysis.py"
       - "backend/routers/recommender.py"
       - "backend/routers/daily_verdict.py"
@@ -35,8 +36,12 @@ on:
       - "scripts/tradebrain_phase5_smoke.py"
       - "scripts/tradebrain_phase6_smoke.py"
       - "scripts/tradebrain_phase10_smoke.py"
+      - "scripts/tradebrain_bse_evidence_baseline.py"
       - "pyproject.toml"
       - ".env.example"
+      - "README.md"
+      - "CLAUDE.md"
+      - "AGENTS.md"
       - ".github/workflows/tradebrain-foundation.yml"
   push:
     branches:
@@ -52,6 +57,7 @@ on:
       - "backend/routers/tradebrain_phase8.py"
       - "backend/routers/tradebrain_phase9.py"
       - "backend/routers/tradebrain_phase10.py"
+      - "backend/routers/tradebrain_evidence.py"
       - "backend/routers/analysis.py"
       - "backend/routers/recommender.py"
       - "backend/routers/daily_verdict.py"
@@ -74,8 +80,12 @@ on:
       - "scripts/tradebrain_phase5_smoke.py"
       - "scripts/tradebrain_phase6_smoke.py"
       - "scripts/tradebrain_phase10_smoke.py"
+      - "scripts/tradebrain_bse_evidence_baseline.py"
       - "pyproject.toml"
       - ".env.example"
+      - "README.md"
+      - "CLAUDE.md"
+      - "AGENTS.md"
       - ".github/workflows/tradebrain-foundation.yml"
 
 jobs:
@@ -107,6 +117,7 @@ jobs:
           backend/routers/tradebrain_phase8.py
           backend/routers/tradebrain_phase9.py
           backend/routers/tradebrain_phase10.py
+          backend/routers/tradebrain_evidence.py
           backend/routers/analysis.py
           backend/app.py
           scripts/tradebrain_phase2_smoke.py
@@ -115,6 +126,7 @@ jobs:
           scripts/tradebrain_phase5_smoke.py
           scripts/tradebrain_phase6_smoke.py
           scripts/tradebrain_phase10_smoke.py
+          scripts/tradebrain_bse_evidence_baseline.py
           tradingagents/graph/signal_processing.py
           tradingagents/agents/trader/trader.py
           tradingagents/agents/managers/portfolio_manager.py
@@ -138,6 +150,19 @@ jobs:
       - name: Live Phase 10 calendar + BSE final advisory smoke (observational)
         continue-on-error: true
         run: python scripts/tradebrain_phase10_smoke.py
+      - name: Build live BSE descriptive evidence baseline
+        id: evidence
+        continue-on-error: true
+        env:
+          TRADEBRAIN_EVIDENCE_OUTPUT_DIR: artifacts/evidence
+        run: python scripts/tradebrain_bse_evidence_baseline.py
+      - name: Upload BSE evidence baseline
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bse-evidence-baseline
+          path: artifacts/evidence/
+          if-no-files-found: warn
 
   frontend-contract:
     runs-on: ubuntu-latest
