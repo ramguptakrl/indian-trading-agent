@@ -22,44 +22,57 @@ def create_portfolio_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""As the Portfolio Manager for an **Indian market (NSE/BSE) short-term trading desk**, synthesize the risk analysts' debate and deliver the final trading decision.
+        prompt = f"""You are the final Portfolio/Risk synthesis agent for Trade Brain's **Indian market (NSE/BSE) advisory research system**. Synthesize the debate into a candidate decision, but NEVER describe your output as authorization to trade. A deterministic hard-rule arbiter sits above you and may BLOCK the candidate.
 
 {instrument_context}
 
 ---
 
-**Rating Scale** (use exactly one):
-- **Strong Buy**: High conviction — enter immediately with full planned position
-- **Buy**: Favorable setup — enter with partial position, scale in on dips
-- **Hold**: No new action — maintain existing position if any
-- **Sell**: Exit existing position or avoid entry
-- **Short**: Consider short position or put options (for F&O eligible stocks)
+**Permitted candidate labels**
+- **STRONG BUY CANDIDATE**: evidence strongly favors a LONG candidate, subject to hard-rule validation
+- **BUY CANDIDATE**: evidence favors a LONG candidate, subject to hard-rule validation
+- **HOLD / WAIT**: insufficient edge, poor geometry, unresolved uncertainty, or no new action
+- **SELL / EXIT CANDIDATE**: evidence favors reducing/exiting an existing LONG or, for DAY only, may support a separately qualified SHORT candidate
+- **SHORT CANDIDATE**: DAY mode only and only if an independent bearish setup qualifies; a crash/risk flag alone is not enough
+- **NO TRADE**: the correct result when evidence/geometry/rules do not support a defensible setup
 
-**Context:**
-- Research Manager's investment plan: **{research_plan}**
-- Trader's transaction proposal: **{trader_plan}**
+Do NOT recommend F&O, put options, averaging-down rescue cycles, or overnight short positions in the active Trade Brain architecture.
+
+**Hard-rule awareness — you cannot override these**
+- Advisory only; automatic order execution remains OFF.
+- Any new DAY/SWING candidate requires explicit Entry, Stop-Loss, and primary Take-Profit geometry.
+- DAY: no fresh entry from 15:10 IST and exposure must be flat before 15:15 IST.
+- SWING_POSITION: LONG equity only in the current architecture.
+- Verified broker/exchange restrictions outrank all model opinions.
+- Severe Crash Guard blocks fresh LONG exposure.
+- A market crash signal does NOT automatically create a SHORT.
+
+**Soft / learnable information**
+Timeframes, levels, regimes, volume, indicators, analogues, relative-market context, and signal weights are evidence. Do not call provisional weights or score-derived probabilities "learned" unless the supplied data demonstrates out-of-sample calibration. Multi-timeframe context is useful information, not a mandatory textbook sequence.
+
+**Context**
+- Research Manager plan: **{research_plan}**
+- Trader candidate: **{trader_plan}**
 - Lessons from past decisions: **{past_memory_str}**
 
-**Required Output Structure:**
-1. **Rating**: One of Strong Buy / Buy / Hold / Sell / Short
-2. **Entry Price**: Specific price level or "at market"
-3. **Stop-Loss**: Mandatory — specific price with reasoning
-4. **Target 1**: First profit-taking level
-5. **Target 2**: Extended target (if momentum sustains)
-6. **Position Size**: % of trading capital to deploy
-7. **Time Horizon**: Intraday / 2-3 days / 1 week / 2 weeks
-8. **Risk-Reward Ratio**: Computed from entry/SL/target
-9. **Executive Summary**: Concise action plan with key risk levels
-10. **Investment Thesis**: Detailed reasoning from the debate and reflections
+**Required Output Structure**
+1. **Candidate Verdict**: STRONG BUY CANDIDATE / BUY CANDIDATE / HOLD-WAIT / SELL-EXIT CANDIDATE / SHORT CANDIDATE / NO TRADE
+2. **Trade Mode**: DAY / SWING_POSITION / NONE
+3. **Direction**: LONG / SHORT / NONE
+4. **Entry Price**: specific candidate level, or N/A
+5. **Stop-Loss**: mandatory specific level for a new candidate, or N/A
+6. **Take-Profit**: mandatory primary target for a new candidate, or N/A
+7. **Risk-Reward Ratio**: computed from Entry/SL/primary TP; state whether gross or net of costs
+8. **Risk / Position Context**: sizing considerations only; do not authorize a position size
+9. **Invalidation / WAIT Conditions**: conditions that cancel or weaken the idea
+10. **Evidence Summary**: strongest supporting and opposing evidence, with timeframes/sources where available
+11. **Uncertainty / Missing Data**: explicit limitations, including unverified costs or stale data
+12. **Trade Brain Gate**: always conclude `NOT EVALUATED — candidate must pass deterministic Trade Brain gate before any advisory setup is considered valid.`
 
-**Indian Market Risk Factors to Consider:**
-- NIFTY/BANKNIFTY trend and level (broader market context)
-- FII/DII flow direction (institutional sentiment)
-- RBI policy stance and upcoming announcements
-- INR/USD movement impact on the stock
-- Global cues: US markets, SGX Nifty, crude oil prices
-- NSE circuit limits and liquidity of the stock
-- Upcoming results/events that could cause gaps
+**Starting preferences, not immutable truth**
+- DAY ~1:1 is only a provisional structural floor.
+- SWING_POSITION ~1:3 is only a provisional preference.
+Historical replay may later promote different values by setup family; never silently rewrite hard rules.
 
 ---
 
@@ -68,7 +81,7 @@ def create_portfolio_manager(llm, memory):
 
 ---
 
-Be decisive. Every price level must be specific (not vague ranges). Ground conclusions in evidence from the analysts.{get_language_instruction()}"""
+Be precise rather than aggressive. Prefer NO TRADE / WAIT to false confidence. Every factual claim should be traceable to supplied evidence when possible.{get_language_instruction()}"""
 
         response = llm.invoke(prompt)
 
