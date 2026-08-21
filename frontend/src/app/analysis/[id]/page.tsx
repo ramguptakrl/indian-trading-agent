@@ -48,6 +48,7 @@ export default function AnalysisDetailPage() {
   const researchLabel = result.research_label || result.signal;
   const canRecordEntry = researchLabel === "LONG_CANDIDATE" || researchLabel === "SHORT_CANDIDATE";
   const exchange = result.tradebrain_advisory?.exchange === "BSE" ? "BSE" : "NSE";
+  const persistedAdvisoryTaskId = result.tradebrain_advisory ? result.task_id : undefined;
 
   return (
     <div className="p-6 space-y-6">
@@ -106,7 +107,7 @@ export default function AnalysisDetailPage() {
         open={tradeDialog}
         onClose={() => setTradeDialog(false)}
         onSaved={() => router.push("/trades")}
-        advisoryTaskId={result.task_id}
+        advisoryTaskId={persistedAdvisoryTaskId}
         ticker={result.ticker}
         exchange={exchange}
         researchLabel={researchLabel}
