@@ -1,10 +1,14 @@
+import json
 import os
 import tempfile
 import unittest
 from datetime import datetime
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from backend.tradebrain.exchange_calendar import (
+    NSE_HOLIDAY_API,
+    collect_nse_cash_calendar,
     ingest_nse_cash_holiday_payload,
     session_for_date,
     upsert_verified_session_override,
@@ -12,6 +16,30 @@ from backend.tradebrain.exchange_calendar import (
 from backend.tradebrain.schedule import get_operating_mode
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+class _FakeCalendarResponse:
+    def __init__(self, payload):
+        self._payload = payload
+        self.content = json.dumps(payload).encode("utf-8")
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+class _DirectOnlySession:
+    def __init__(self, payload):
+        self.payload = payload
+        self.urls = []
+
+    def get(self, url, **kwargs):
+        self.urls.append(url)
+        if url != NSE_HOLIDAY_API:
+            raise AssertionError("Public HTML bootstrap should not be called when direct API succeeds")
+        return _FakeCalendarResponse(self.payload)
 
 
 class Phase8ExchangeCalendarTests(unittest.TestCase):
@@ -32,6 +60,14 @@ class Phase8ExchangeCalendarTests(unittest.TestCase):
     def tearDown(self):
         os.environ.pop("TRADEBRAIN_DATA_DIR", None)
         self.tmp.cleanup()
+
+    def test_direct_official_api_is_tried_before_html_bootstrap(self):
+        session = _DirectOnlySession(self.PAYLOAD)
+        with patch("backend.tradebrain.exchange_calendar.requests.Session", return_value=session):
+            result = collect_nse_cash_calendar(db_path=self.db_path)
+        self.assertEqual(result["status"], "SUCCESS")
+        self.assertEqual(result["transport"], "DIRECT_OFFICIAL_API")
+        self.assertEqual(session.urls, [NSE_HOLIDAY_API])
 
     def test_official_holiday_is_verified_closed(self):
         day = session_for_date("2026-01-26", exchange="NSE", db_path=self.db_path)
