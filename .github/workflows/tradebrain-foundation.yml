@@ -5,6 +5,7 @@ on:
     paths:
       - "backend/tradebrain/**"
       - "backend/routers/tradebrain.py"
+      - "backend/routers/tradebrain_phase3.py"
       - "backend/routers/recommender.py"
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
@@ -13,6 +14,7 @@ on:
       - "tradingagents/agents/managers/portfolio_manager.py"
       - "tests/test_tradebrain_*.py"
       - "scripts/tradebrain_phase2_smoke.py"
+      - "scripts/tradebrain_phase3_smoke.py"
       - "pyproject.toml"
       - ".github/workflows/tradebrain-foundation.yml"
   push:
@@ -21,6 +23,7 @@ on:
     paths:
       - "backend/tradebrain/**"
       - "backend/routers/tradebrain.py"
+      - "backend/routers/tradebrain_phase3.py"
       - "backend/routers/recommender.py"
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
@@ -29,6 +32,7 @@ on:
       - "tradingagents/agents/managers/portfolio_manager.py"
       - "tests/test_tradebrain_*.py"
       - "scripts/tradebrain_phase2_smoke.py"
+      - "scripts/tradebrain_phase3_smoke.py"
       - "pyproject.toml"
       - ".github/workflows/tradebrain-foundation.yml"
 
@@ -40,15 +44,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install minimal test dependencies
-        run: python -m pip install "pydantic>=2,<3" "requests>=2.32" "pypdf>=5,<7" "tzdata>=2025.2"
+      - name: Install Trade Brain test dependencies
+        run: >-
+          python -m pip install
+          "pydantic>=2,<3"
+          "requests>=2.32"
+          "pypdf>=5,<7"
+          "tzdata>=2025.2"
+          "yfinance>=0.2.63"
       - name: Compile Trade Brain integration files
         run: >-
           python -m compileall -q
           backend/tradebrain
           backend/routers/tradebrain.py
+          backend/routers/tradebrain_phase3.py
           backend/app.py
           scripts/tradebrain_phase2_smoke.py
+          scripts/tradebrain_phase3_smoke.py
           tradingagents/agents/trader/trader.py
           tradingagents/agents/managers/portfolio_manager.py
       - name: Run Trade Brain tests
@@ -56,3 +68,6 @@ jobs:
       - name: Live Phase 2 exchange + attachment smoke (observational)
         continue-on-error: true
         run: python scripts/tradebrain_phase2_smoke.py
+      - name: Live Phase 3 market-data + replay smoke (observational)
+        continue-on-error: true
+        run: python scripts/tradebrain_phase3_smoke.py
