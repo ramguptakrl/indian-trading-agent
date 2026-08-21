@@ -1,13 +1,40 @@
-"""Trade Brain architecture and deterministic policy API."""
+"""Trade Brain architecture, policy, identity, and evidence-store API."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
 from backend.tradebrain import TRADEBRAIN_VERSION
 from backend.tradebrain.identity import ExchangeListing, validate_listing_identity
 from backend.tradebrain.policy import TradePlan, evaluate_trade_plan
 from backend.tradebrain.schedule import get_operating_mode
+from backend.tradebrain.store import (
+    record_plan_evaluation,
+    record_plan_outcome,
+    store_stats,
+    upsert_listing,
+)
 
 router = APIRouter(prefix="/api/tradebrain", tags=["tradebrain"])
+
+
+class IdentityUpsertRequest(BaseModel):
+    listing: ExchangeListing
+    listing_name: str | None = None
+    security_name: str | None = None
+    listing_status: str = "UNKNOWN"
+    source_key: str | None = None
+    source_timestamp: str | None = None
+
+
+class PlanOutcomeRequest(BaseModel):
+    outcome: str
+    exit_price: float | None = None
+    exit_timestamp: str | None = None
+    mae_pct: float | None = None
+    mfe_pct: float | None = None
+    r_multiple: float | None = None
+    time_to_event_minutes: float | None = None
+    notes: str | None = None
 
 
 @router.get("/doctrine")
@@ -65,14 +92,49 @@ def operating_mode():
 
 
 @router.post("/validate-plan")
-def validate_plan(plan: TradePlan):
+def validate_plan(
+    plan: TradePlan,
+    persist: bool = Query(False, description="Persist this evaluation for later outcome learning"),
+):
     """Run a structured candidate through deterministic Trade Brain rules."""
-    return evaluate_trade_plan(plan)
+    result = evaluate_trade_plan(plan)
+    payload = result.model_dump()
+    if persist:
+        payload["plan_id"] = record_plan_evaluation(plan, result)
+        payload["persisted"] = True
+    else:
+        payload["persisted"] = False
+    return payload
+
+
+@router.post("/plans/{plan_id}/outcome")
+def save_plan_outcome(plan_id: str, data: PlanOutcomeRequest):
+    """Attach plan-specific outcomes for replay/calibration learning."""
+    record_plan_outcome(plan_id, **data.model_dump())
+    return {"status": "saved", "plan_id": plan_id}
 
 
 @router.post("/identity/validate")
 def validate_identity(listing: ExchangeListing):
     return validate_listing_identity(listing)
+
+
+@router.post("/identity/upsert")
+def persist_identity(data: IdentityUpsertRequest):
+    """Persist one safe listing/security identity without fuzzy name merging."""
+    return upsert_listing(
+        data.listing,
+        listing_name=data.listing_name,
+        security_name=data.security_name,
+        listing_status=data.listing_status,
+        source_key=data.source_key,
+        source_timestamp=data.source_timestamp,
+    )
+
+
+@router.get("/store/stats")
+def get_store_stats():
+    return store_stats()
 
 
 @router.get("/roadmap")
@@ -82,14 +144,16 @@ def roadmap():
             "deterministic hard-rule gate",
             "market/study operating-mode scheduler",
             "ISIN-first identity primitives",
-            "provenance hashing primitives",
+            "persistent issuer/security/listing tables",
+            "provenance hashing + raw-artifact registry",
+            "persistent structured plan evaluations and outcomes",
             "soft-evidence annotations for legacy heuristic outputs",
         ],
         "next": [
-            "official NSE/BSE security-master collectors + persisted issuer/security/listing map",
+            "official NSE/BSE security-master collectors feeding the persisted identity layer",
             "corporate-event and attachment archive with hashing/idempotency",
             "audited OHLCV store and derived multi-timeframe candles",
-            "plan-specific outcome records (TP-first/SL-first/MAE/MFE/time-to-event)",
+            "automatic TP-first/SL-first/MAE/MFE/time-to-event outcome backfill",
             "BSE-focused Crash Guard and level-reliability replay",
             "MTF financing + Indian broker cost engine",
             "challenger/promote learning workflow with walk-forward validation",
