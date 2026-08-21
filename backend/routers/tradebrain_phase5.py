@@ -152,7 +152,7 @@ def phase5_hardened_regime(series_id: str, as_of: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.get("/challengers/doctrine")
+@router.get("/phase5/doctrine")
 def phase5_doctrine():
     return {
         "phase": 5,
