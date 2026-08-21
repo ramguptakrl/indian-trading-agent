@@ -202,16 +202,7 @@ def ingest_nse_cash_holiday_payload(
     }
 
 
-def collect_nse_cash_calendar(*, db_path: str | None = None, timeout: float = 20.0) -> dict[str, Any]:
-    session = requests.Session()
-    headers = {
-        "User-Agent": "Mozilla/5.0 (TradeBrain calendar collector; +https://www.nseindia.com)",
-        "Accept": "application/json,text/plain,*/*",
-        "Referer": NSE_HOLIDAY_PAGE,
-    }
-    # NSE may require cookies from the public page before API access.
-    session.get(NSE_HOLIDAY_PAGE, headers=headers, timeout=timeout)
-    response = session.get(NSE_HOLIDAY_API, headers=headers, timeout=timeout)
+def _decode_nse_calendar_response(response: requests.Response) -> tuple[dict[str, Any], bytes]:
     response.raise_for_status()
     raw = response.content
     try:
@@ -219,9 +210,64 @@ def collect_nse_cash_calendar(*, db_path: str | None = None, timeout: float = 20
     except ValueError as exc:
         _archive_payload(raw, exchange="NSE")
         raise ValueError("NSE holiday endpoint did not return valid JSON") from exc
-    return ingest_nse_cash_holiday_payload(
-        payload, raw_bytes=raw, fetched_at=datetime.now(timezone.utc).isoformat(), db_path=db_path
-    )
+    if not isinstance(payload, dict):
+        _archive_payload(raw, exchange="NSE")
+        raise ValueError("NSE holiday endpoint JSON root must be an object")
+    # Validate the expected source shape before calling the fetch successful.
+    parse_nse_cash_holidays(payload)
+    return payload, raw
+
+
+def collect_nse_cash_calendar(*, db_path: str | None = None, timeout: float = 20.0) -> dict[str, Any]:
+    """Collect NSE cash holidays with direct API first and cookie bootstrap fallback.
+
+    The JSON endpoint is the source of truth. The public HTML page is used only to
+    obtain cookies when the API rejects a direct request; a slow/blocking HTML page
+    must not prevent an otherwise reachable official API from being tried.
+    """
+
+    session = requests.Session()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36",
+        "Accept": "application/json,text/plain,*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": NSE_HOLIDAY_PAGE,
+    }
+    errors: list[str] = []
+
+    # Attempt 1: official JSON endpoint directly. This avoids making the public HTML
+    # landing page a single point of failure on cloud runners.
+    try:
+        response = session.get(NSE_HOLIDAY_API, headers=headers, timeout=min(timeout, 10.0))
+        payload, raw = _decode_nse_calendar_response(response)
+        result = ingest_nse_cash_holiday_payload(
+            payload, raw_bytes=raw, fetched_at=datetime.now(timezone.utc).isoformat(), db_path=db_path
+        )
+        result["transport"] = "DIRECT_OFFICIAL_API"
+        return result
+    except Exception as exc:
+        errors.append(f"direct={type(exc).__name__}: {exc}")
+
+    # Attempt 2: bootstrap cookies from the public official page, then retry the exact
+    # same JSON endpoint. A page failure is recorded, but we still attempt the API once
+    # more because some NSE edge paths behave differently after the first request.
+    try:
+        session.get(NSE_HOLIDAY_PAGE, headers=headers, timeout=min(timeout, 6.0))
+    except Exception as exc:
+        errors.append(f"bootstrap={type(exc).__name__}: {exc}")
+
+    try:
+        response = session.get(NSE_HOLIDAY_API, headers=headers, timeout=min(timeout, 12.0))
+        payload, raw = _decode_nse_calendar_response(response)
+        result = ingest_nse_cash_holiday_payload(
+            payload, raw_bytes=raw, fetched_at=datetime.now(timezone.utc).isoformat(), db_path=db_path
+        )
+        result["transport"] = "COOKIE_BOOTSTRAP_OFFICIAL_API"
+        return result
+    except Exception as exc:
+        errors.append(f"retry={type(exc).__name__}: {exc}")
+
+    raise RuntimeError("NSE official holiday calendar transport failed safely; " + " | ".join(errors))
 
 
 def _official_calendar_host(url: str, exchange: str) -> bool:
