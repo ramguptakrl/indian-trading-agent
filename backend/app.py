@@ -13,11 +13,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from backend.db import ensure_db
-from backend.routers import market_data, analysis, watchlist, backtest, strategies, scanner, performance, recommender, settings as settings_router, news as news_router, simulation as simulation_router, insights as insights_router, fii_dii as fii_dii_router, calendar as calendar_router, concentration as concentration_router, daily_verdict as daily_verdict_router, signal_performance as signal_performance_router, verdict_calibration as verdict_calibration_router, regime as regime_router, confidence_calibration as confidence_calibration_router, shadow_trades as shadow_trades_router, memory as memory_router, tradebrain as tradebrain_router
+from backend.routers import market_data, analysis, watchlist, backtest, strategies, scanner, performance, recommender, settings as settings_router, news as news_router, simulation as simulation_router, insights as insights_router, fii_dii as fii_dii_router, calendar as calendar_router, concentration as concentration_router, daily_verdict as daily_verdict_router, signal_performance as signal_performance_router, verdict_calibration as verdict_calibration_router, regime as regime_router, confidence_calibration as confidence_calibration_router, shadow_trades as shadow_trades_router, memory as memory_router, tradebrain as tradebrain_router, tradebrain_phase3 as tradebrain_phase3_router
 from backend.settings_manager import load_api_keys_into_env, apply_llm_config_to_default
 from backend.tradebrain.store import ensure_tradebrain_schema
 from backend.tradebrain.security_store import ensure_security_master_schema
 from backend.tradebrain.corporate_event_store import ensure_corporate_event_schema
+from backend.tradebrain.market_data_store import ensure_market_data_schema
 
 
 @asynccontextmanager
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI):
     ensure_tradebrain_schema()
     ensure_security_master_schema()
     ensure_corporate_event_schema()
+    ensure_market_data_schema()
     # Load API keys from DB (UI takes priority over .env)
     load_api_keys_into_env()
     # Apply saved LLM config to DEFAULT_CONFIG
@@ -36,7 +38,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Indian Market Trading Agent — Trade Brain Reframe",
     description="AI-assisted Indian-market research with a deterministic advisory-only Trade Brain policy layer",
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
@@ -71,6 +73,7 @@ app.include_router(confidence_calibration_router.router)
 app.include_router(shadow_trades_router.router)
 app.include_router(memory_router.router)
 app.include_router(tradebrain_router.router)
+app.include_router(tradebrain_phase3_router.router)
 
 
 @app.get("/api/health")
@@ -79,8 +82,10 @@ def health():
         "status": "ok",
         "service": "indian-trading-agent",
         "tradebrain_reframe": True,
-        "tradebrain_version": "0.3.0",
+        "tradebrain_version": "0.4.0",
         "corporate_event_memory": True,
+        "audited_market_data": True,
+        "lookahead_safe_replay": True,
         "advisory_only": True,
         "order_execution_enabled": False,
     }
