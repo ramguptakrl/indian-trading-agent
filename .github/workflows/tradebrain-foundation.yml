@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "backend/tradebrain/**"
+      - "backend/routers/market_data.py"
       - "backend/routers/tradebrain.py"
       - "backend/routers/tradebrain_phase3.py"
       - "backend/routers/tradebrain_phase4.py"
@@ -19,6 +20,8 @@ on:
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
       - "tradingagents/default_config.py"
+      - "tradingagents/dataflows/interface.py"
+      - "tradingagents/dataflows/tradebrain_market.py"
       - "tradingagents/graph/signal_processing.py"
       - "tradingagents/agents/trader/trader.py"
       - "tradingagents/agents/managers/portfolio_manager.py"
@@ -49,6 +52,7 @@ on:
       - "tradebrain/**"
     paths:
       - "backend/tradebrain/**"
+      - "backend/routers/market_data.py"
       - "backend/routers/tradebrain.py"
       - "backend/routers/tradebrain_phase3.py"
       - "backend/routers/tradebrain_phase4.py"
@@ -64,6 +68,8 @@ on:
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
       - "tradingagents/default_config.py"
+      - "tradingagents/dataflows/interface.py"
+      - "tradingagents/dataflows/tradebrain_market.py"
       - "tradingagents/graph/signal_processing.py"
       - "tradingagents/agents/trader/trader.py"
       - "tradingagents/agents/managers/portfolio_manager.py"
@@ -104,6 +110,7 @@ jobs:
           "pydantic>=2,<3"
           "requests>=2.32"
           "pypdf>=5,<7"
+          "stockstats>=0.6.5"
           "tzdata>=2025.2"
           "websockets>=13"
           "yfinance>=0.2.63"
@@ -111,6 +118,7 @@ jobs:
         run: >-
           python -m compileall -q
           backend/tradebrain
+          backend/routers/market_data.py
           backend/routers/tradebrain.py
           backend/routers/tradebrain_phase3.py
           backend/routers/tradebrain_phase4.py
@@ -131,6 +139,8 @@ jobs:
           scripts/tradebrain_phase10_smoke.py
           scripts/tradebrain_bse_evidence_baseline.py
           scripts/tradebrain_kite_live_stream.py
+          tradingagents/dataflows/interface.py
+          tradingagents/dataflows/tradebrain_market.py
           tradingagents/graph/signal_processing.py
           tradingagents/agents/trader/trader.py
           tradingagents/agents/managers/portfolio_manager.py
