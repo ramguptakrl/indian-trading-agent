@@ -59,7 +59,6 @@ def _normalize_choice(value: str | None, allowed: set[str]) -> str | None:
     if not value:
         return None
     cleaned = _clean(value).upper().replace("–", "-").replace("—", "-")
-    # Strip explanatory text after a clear delimiter, but never search prose for a choice.
     first = re.split(r"\s+(?:BECAUSE|DUE TO|AS |\-|\(|\[)", cleaned, maxsplit=1)[0].strip()
     if cleaned in allowed:
         return cleaned
@@ -74,8 +73,6 @@ def _price(value: str | None) -> float | None:
     cleaned = _clean(value).upper()
     if cleaned in {"N/A", "NA", "NONE", "NOT APPLICABLE", "-"}:
         return None
-    # A structured price field must begin with one unambiguous numeric value. Ranges,
-    # alternatives, market-price prose and multiple numbers fail closed.
     cleaned = cleaned.replace("₹", "").replace("RS.", "").replace("RS", "").replace(",", "").strip()
     match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)(?:\s*(?:INR|RUPEES?))?", cleaned)
     if not match:
@@ -94,7 +91,7 @@ def parse_agent_candidate(text: str) -> dict[str, Any]:
     direction = _normalize_choice(raw["direction"], {"LONG", "SHORT", "NONE"})
     parsed = {
         "candidate_verdict": verdict,
-        "mode": to_active_mode(mode) if mode and mode not in {"NONE"} else None,
+        "mode": to_active_mode(mode) if mode and mode != "NONE" else None,
         "direction": direction if direction and direction != "NONE" else None,
         "entry": _price(raw["entry"]),
         "stop_loss": _price(raw["stop_loss"]),
@@ -133,8 +130,8 @@ def parse_agent_candidate(text: str) -> dict[str, Any]:
         errors.append("BUY candidate verdict requires Direction LONG")
     if verdict in SHORT_VERDICTS and direction != "SHORT":
         errors.append("SHORT candidate verdict requires Direction SHORT")
-    if verdict in EXIT_VERDICTS and direction == "LONG":
-        errors.append("SELL/EXIT candidate cannot be treated as a fresh LONG entry")
+    if verdict in EXIT_VERDICTS:
+        errors.append("SELL/EXIT is a reduction/exit label, not permission to initiate a fresh position; use SHORT CANDIDATE for a new intraday short")
 
     if errors:
         parsed.update(
@@ -147,13 +144,12 @@ def parse_agent_candidate(text: str) -> dict[str, Any]:
         )
         return parsed
 
-    research_label = "LONG_CANDIDATE" if direction == "LONG" else "SHORT_CANDIDATE"
     parsed.update(
         {
             "parse_status": "STRUCTURED_CANDIDATE",
             "errors": [],
             "entry_candidate": True,
-            "research_label": research_label,
+            "research_label": "LONG_CANDIDATE" if direction == "LONG" else "SHORT_CANDIDATE",
         }
     )
     return parsed
@@ -182,21 +178,13 @@ def _cost_scenarios(plan: TradePlan, *, quantity: int | None, slippage_bps: floa
             "note": "Capital-gains/income-tax liability is not included in per-trade transaction-cost P&L.",
         }
     target = calculate_equity_trade_costs(
-        mode=plan.mode,
-        exchange=plan.exchange,
-        direction=plan.direction,
-        entry_price=plan.entry,
-        exit_price=plan.take_profit,
-        quantity=quantity,
+        mode=plan.mode, exchange=plan.exchange, direction=plan.direction,
+        entry_price=plan.entry, exit_price=plan.take_profit, quantity=quantity,
         slippage_bps=slippage_bps,
     )
     stop = calculate_equity_trade_costs(
-        mode=plan.mode,
-        exchange=plan.exchange,
-        direction=plan.direction,
-        entry_price=plan.entry,
-        exit_price=plan.stop_loss,
-        quantity=quantity,
+        mode=plan.mode, exchange=plan.exchange, direction=plan.direction,
+        entry_price=plan.entry, exit_price=plan.stop_loss, quantity=quantity,
         slippage_bps=slippage_bps,
     )
     net_reward = float(target["net_pnl"])
@@ -221,13 +209,18 @@ def evaluate_final_advisory(
     final_trade_decision: str,
     evaluated_at: datetime | str | None = None,
     quantity: int | None = None,
-    crash_guard: str = "NORMAL",
-    broker_allows_trade: bool = True,
+    crash_guard: str | None = None,
+    broker_allows_trade: bool | None = None,
     require_verified_calendar: bool = True,
     slippage_bps: float = 0.0,
     db_path: str | None = None,
 ) -> dict[str, Any]:
-    """Convert explicit agent structure into a deterministic advisory result."""
+    """Convert explicit agent structure into a deterministic advisory result.
+
+    A fresh-entry candidate cannot reach the policy gate until calendar, Crash Guard,
+    and broker/exchange permission states are explicit. Unknown deterministic facts
+    block validation rather than being guessed from agent prose.
+    """
 
     parsed = parse_agent_candidate(final_trade_decision)
     now = _aware(evaluated_at)
@@ -289,19 +282,23 @@ def evaluate_final_advisory(
             base["costs"] = {"status": "NOT_COMPUTED_SESSION_BLOCK"}
             return base
 
+    if crash_guard not in {"NORMAL", "ELEVATED", "SEVERE"}:
+        base["final_status"] = "BLOCK_CRASH_GUARD_UNVERIFIED"
+        base["gate"] = None
+        base["costs"] = {"status": "NOT_COMPUTED_RISK_STATE_BLOCK"}
+        return base
+    if broker_allows_trade is None:
+        base["final_status"] = "BLOCK_BROKER_PERMISSION_UNVERIFIED"
+        base["gate"] = None
+        base["costs"] = {"status": "NOT_COMPUTED_BROKER_STATE_BLOCK"}
+        return base
+
     plan = TradePlan(
-        ticker=base["ticker"],
-        exchange=base["exchange"],
-        mode=parsed["mode"],
-        direction=parsed["direction"],
-        entry=parsed["entry"],
-        stop_loss=parsed["stop_loss"],
-        take_profit=parsed["take_profit"],
-        quantity=quantity,
-        crash_guard=crash_guard,
+        ticker=base["ticker"], exchange=base["exchange"], mode=parsed["mode"],
+        direction=parsed["direction"], entry=parsed["entry"], stop_loss=parsed["stop_loss"],
+        take_profit=parsed["take_profit"], quantity=quantity, crash_guard=crash_guard,
         broker_allows_trade=broker_allows_trade,
-        evidence=["AI_STRUCTURED_CANDIDATE_NOT_SOURCE_OF_TRUTH"],
-        evaluated_at_ist=now,
+        evidence=["AI_STRUCTURED_CANDIDATE_NOT_SOURCE_OF_TRUTH"], evaluated_at_ist=now,
     )
     gate = evaluate_trade_plan(plan, db_path=db_path)
     base["gate"] = gate.model_dump()
