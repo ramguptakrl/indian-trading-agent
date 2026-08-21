@@ -4,30 +4,24 @@ from typing import Any
 
 
 class SignalProcessor:
-    """Processes trading signals to extract actionable decisions."""
+    """Extract a non-authorizing research label from structured Trade Brain output.
+
+    The original upstream processor used another LLM call to collapse the final report
+    into BUY/SELL/HOLD. Trade Brain deliberately removes that authorization-like seam.
+    Parsing is deterministic and fail-closed; actual plan validity belongs to the
+    deterministic final advisory pipeline.
+    """
 
     def __init__(self, quick_thinking_llm: Any):
-        """Initialize with an LLM for processing."""
+        # Retained in the constructor for upstream compatibility. No LLM is used here.
         self.quick_thinking_llm = quick_thinking_llm
 
     def process_signal(self, full_signal: str) -> str:
-        """
-        Process a full trading signal to extract the core decision.
+        """Return LONG_CANDIDATE / SHORT_CANDIDATE / EXIT_CANDIDATE / WAIT / NO_TRADE."""
+        try:
+            from backend.tradebrain.advisory_pipeline import research_label
 
-        Args:
-            full_signal: Complete trading signal text
-
-        Returns:
-            Extracted rating (BUY, OVERWEIGHT, HOLD, UNDERWEIGHT, or SELL)
-        """
-        messages = [
-            (
-                "system",
-                "You are an efficient assistant that extracts the trading decision from analyst reports. "
-                "Extract the rating as exactly one of: BUY, OVERWEIGHT, HOLD, UNDERWEIGHT, SELL. "
-                "Output only the single rating word, nothing else.",
-            ),
-            ("human", full_signal),
-        ]
-
-        return self.quick_thinking_llm.invoke(messages).content
+            return research_label(full_signal)
+        except Exception:
+            # A parser/import failure must never degrade into a bullish/bearish command.
+            return "NO_TRADE"
