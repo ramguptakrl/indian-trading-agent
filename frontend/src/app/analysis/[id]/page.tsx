@@ -43,10 +43,17 @@ export default function AnalysisDetailPage() {
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-bold">{result.ticker} Analysis</h1>
-        <p className="text-sm text-muted-foreground">Date: {result.trade_date} | Task: {result.task_id}</p>
+        <p className="text-sm text-muted-foreground">
+          Date: {result.trade_date} | Task: {result.task_id} | Advisory research only
+        </p>
       </div>
 
-      <DecisionCard signal={result.signal} ticker={result.ticker} duration={result.duration_seconds} />
+      <DecisionCard
+        signal={result.research_label || result.signal}
+        ticker={result.ticker}
+        duration={result.duration_seconds}
+        advisory={result.tradebrain_advisory}
+      />
 
       <ReportPanel reports={reports} />
 
