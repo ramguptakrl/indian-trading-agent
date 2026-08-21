@@ -41,6 +41,7 @@ on:
       - "scripts/tradebrain_phase10_smoke.py"
       - "scripts/tradebrain_bse_evidence_baseline.py"
       - "scripts/tradebrain_kite_live_stream.py"
+      - "start.sh"
       - "pyproject.toml"
       - ".env.example"
       - "README.md"
@@ -89,6 +90,7 @@ on:
       - "scripts/tradebrain_phase10_smoke.py"
       - "scripts/tradebrain_bse_evidence_baseline.py"
       - "scripts/tradebrain_kite_live_stream.py"
+      - "start.sh"
       - "pyproject.toml"
       - ".env.example"
       - "README.md"
@@ -144,6 +146,8 @@ jobs:
           tradingagents/graph/signal_processing.py
           tradingagents/agents/trader/trader.py
           tradingagents/agents/managers/portfolio_manager.py
+      - name: Validate one-button launcher syntax
+        run: bash -n start.sh
       - name: Run Trade Brain tests
         run: python -m unittest discover -s tests -p "test_tradebrain_*.py" -v
       - name: Live Phase 2 exchange + attachment smoke (observational)
