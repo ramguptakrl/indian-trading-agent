@@ -15,11 +15,13 @@ from contextlib import asynccontextmanager
 from backend.db import ensure_db
 from backend.routers import market_data, analysis, watchlist, backtest, strategies, scanner, performance, recommender, settings as settings_router, news as news_router, simulation as simulation_router, insights as insights_router, fii_dii as fii_dii_router, calendar as calendar_router, concentration as concentration_router, daily_verdict as daily_verdict_router, signal_performance as signal_performance_router, verdict_calibration as verdict_calibration_router, regime as regime_router, confidence_calibration as confidence_calibration_router, shadow_trades as shadow_trades_router, memory as memory_router, tradebrain as tradebrain_router
 from backend.settings_manager import load_api_keys_into_env, apply_llm_config_to_default
+from backend.tradebrain.store import ensure_tradebrain_schema
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ensure_db()
+    ensure_tradebrain_schema()
     # Load API keys from DB (UI takes priority over .env)
     load_api_keys_into_env()
     # Apply saved LLM config to DEFAULT_CONFIG
