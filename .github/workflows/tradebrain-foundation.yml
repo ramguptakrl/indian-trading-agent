@@ -1,0 +1,38 @@
+name: Trade Brain Foundation
+
+on:
+  pull_request:
+    paths:
+      - "backend/tradebrain/**"
+      - "backend/routers/tradebrain.py"
+      - "backend/routers/recommender.py"
+      - "backend/routers/daily_verdict.py"
+      - "backend/app.py"
+      - "tradingagents/default_config.py"
+      - "tests/test_tradebrain_foundation.py"
+      - ".github/workflows/tradebrain-foundation.yml"
+  push:
+    branches:
+      - "tradebrain/**"
+    paths:
+      - "backend/tradebrain/**"
+      - "backend/routers/tradebrain.py"
+      - "backend/routers/recommender.py"
+      - "backend/routers/daily_verdict.py"
+      - "backend/app.py"
+      - "tradingagents/default_config.py"
+      - "tests/test_tradebrain_foundation.py"
+      - ".github/workflows/tradebrain-foundation.yml"
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install minimal test dependency
+        run: python -m pip install "pydantic>=2,<3"
+      - name: Run Trade Brain foundation tests
+        run: python -m unittest discover -s tests -p "test_tradebrain_foundation.py" -v
