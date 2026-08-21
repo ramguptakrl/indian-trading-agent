@@ -1,14 +1,24 @@
+import importlib.util
 import os
 import tempfile
 import unittest
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from backend.tradebrain.advisory_pipeline import evaluate_final_advisory, parse_agent_candidate, research_label
 from backend.tradebrain.advisory_store import get_final_advisory, save_final_advisory
 from backend.tradebrain.challenger_store import activate_soft_parameter
 from backend.tradebrain.exchange_calendar import ingest_nse_cash_holiday_payload
-from tradingagents.graph.signal_processing import SignalProcessor
+
+# Load the actual module file without executing tradingagents.graph.__init__, which
+# imports the full LangGraph runtime not installed in the lightweight Trade Brain CI.
+_SIGNAL_PATH = Path(__file__).resolve().parents[1] / "tradingagents" / "graph" / "signal_processing.py"
+_SPEC = importlib.util.spec_from_file_location("tradebrain_test_signal_processing", _SIGNAL_PATH)
+_SIGNAL_MODULE = importlib.util.module_from_spec(_SPEC)
+assert _SPEC and _SPEC.loader
+_SPEC.loader.exec_module(_SIGNAL_MODULE)
+SignalProcessor = _SIGNAL_MODULE.SignalProcessor
 
 IST = ZoneInfo("Asia/Kolkata")
 
