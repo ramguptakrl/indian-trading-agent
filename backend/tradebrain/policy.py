@@ -3,6 +3,9 @@
 The existing multi-agent system may research, debate, rank, and propose ideas. This
 module is the final deterministic gate for a structured trade plan. It deliberately
 does not place orders and cannot be overridden by an LLM response.
+
+Phase 6 active product modes are INTRADAY and SWING. Historical DAY and
+SWING_POSITION values remain accepted as compatibility aliases only.
 """
 
 from __future__ import annotations
@@ -13,14 +16,19 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
+from backend.tradebrain.trade_modes import CompatibleTradeMode, to_active_mode
+
 IST = ZoneInfo("Asia/Kolkata")
 
-TradeMode = Literal["DAY", "SWING_POSITION"]
+TradeMode = CompatibleTradeMode
 Direction = Literal["LONG", "SHORT"]
 CrashGuardState = Literal["NORMAL", "ELEVATED", "SEVERE"]
 
-DAY_NO_FRESH_ENTRY = time(15, 10)
-DAY_HARD_EXIT = time(15, 15)
+INTRADAY_NO_FRESH_ENTRY = time(15, 10)
+INTRADAY_HARD_EXIT = time(15, 15)
+# Backward-compatible exported names used by earlier tests/callers.
+DAY_NO_FRESH_ENTRY = INTRADAY_NO_FRESH_ENTRY
+DAY_HARD_EXIT = INTRADAY_HARD_EXIT
 
 
 class TradePlan(BaseModel):
@@ -45,6 +53,7 @@ class GateResult(BaseModel):
 
     allowed_for_advisory: bool
     action: Literal["PASS", "WAIT", "BLOCK", "HARD_EXIT"]
+    active_mode: Literal["INTRADAY", "SWING"]
     advisory_only: bool = True
     order_execution_allowed: bool = False
     hard_rule_failures: list[str] = Field(default_factory=list)
@@ -78,13 +87,14 @@ def _reward_risk(plan: TradePlan) -> float | None:
 def evaluate_trade_plan(plan: TradePlan) -> GateResult:
     """Apply immutable/user-controlled rules before any trade guidance is trusted.
 
-    Soft preferences (for example DAY >= 1:1 and SWING around 1:3) create warnings,
-    not silent hard rules. They should later be challenged with replay data.
+    Soft preferences (for example INTRADAY >= 1:1 and SWING around 1:3) create
+    warnings, not silent hard rules. They can be challenged with replay data.
     """
 
     failures: list[str] = []
     warnings: list[str] = []
     now = _now_ist(plan.evaluated_at_ist)
+    active_mode = to_active_mode(plan.mode)
 
     # Mandatory TP/SL geometry.
     if plan.direction == "LONG":
@@ -94,9 +104,9 @@ def evaluate_trade_plan(plan: TradePlan) -> GateResult:
         if not (plan.take_profit < plan.entry < plan.stop_loss):
             failures.append("SHORT requires take_profit < entry < stop_loss")
 
-    # Current product architecture: swing/position is long equity only.
-    if plan.mode == "SWING_POSITION" and plan.direction == "SHORT":
-        failures.append("SWING_POSITION short is not allowed in the current architecture")
+    # Active resident equity product boundary: overnight SWING is LONG-only.
+    if active_mode == "SWING" and plan.direction == "SHORT":
+        failures.append("SWING short is not allowed in the active cash-equity architecture")
 
     # Broker/exchange restrictions, once known, outrank model opinions.
     if not plan.broker_allows_trade:
@@ -106,14 +116,14 @@ def evaluate_trade_plan(plan: TradePlan) -> GateResult:
     if plan.crash_guard == "SEVERE" and plan.direction == "LONG":
         failures.append("Severe Crash Guard blocks fresh LONG exposure")
 
-    # User hard clock: no fresh DAY entries from 15:10; DAY positions invalid at 15:15.
-    if plan.mode == "DAY":
+    # User hard clock: no fresh INTRADAY entries from 15:10; flat before 15:15.
+    if active_mode == "INTRADAY":
         clock = now.timetz().replace(tzinfo=None)
-        if clock >= DAY_HARD_EXIT:
-            failures.append("DAY position must be flat before 15:15 IST")
+        if clock >= INTRADAY_HARD_EXIT:
+            failures.append("INTRADAY position must be flat before 15:15 IST")
             action = "HARD_EXIT"
-        elif clock >= DAY_NO_FRESH_ENTRY:
-            failures.append("No fresh DAY entry from 15:10 IST; exit window is active")
+        elif clock >= INTRADAY_NO_FRESH_ENTRY:
+            failures.append("No fresh INTRADAY entry from 15:10 IST; exit window is active")
             action = "BLOCK"
         else:
             action = "PASS"
@@ -121,12 +131,11 @@ def evaluate_trade_plan(plan: TradePlan) -> GateResult:
         action = "PASS"
 
     rr = _reward_risk(plan)
-    preferred = 1.0 if plan.mode == "DAY" else 3.0
+    preferred = 1.0 if active_mode == "INTRADAY" else 3.0
     if rr is None:
-        # Geometry failure is already captured above; keep output explicit.
         warnings.append("Reward/risk could not be computed from the submitted geometry")
     elif rr < preferred:
-        label = "1:1 DAY starting floor" if plan.mode == "DAY" else "~1:3 SWING starting preference"
+        label = "1:1 INTRADAY starting floor" if active_mode == "INTRADAY" else "~1:3 SWING starting preference"
         warnings.append(
             f"Reward/risk {rr:.2f}:1 is below the provisional {label}; treat as WAIT/research until evidence supports it"
         )
@@ -140,13 +149,13 @@ def evaluate_trade_plan(plan: TradePlan) -> GateResult:
         allowed = False
     else:
         allowed = True
-        # A hard-rule pass is not a BUY/SELL command. Weak soft geometry becomes WAIT.
         if rr is not None and rr < preferred:
             action = "WAIT"
 
     return GateResult(
         allowed_for_advisory=allowed,
         action=action,
+        active_mode=active_mode,
         hard_rule_failures=failures,
         warnings=warnings,
         reward_risk=round(rr, 3) if rr is not None else None,
