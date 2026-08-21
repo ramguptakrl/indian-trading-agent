@@ -63,12 +63,12 @@ def _data_root() -> Path:
     return Path.home() / ".tradingagents" / "tradebrain"
 
 
-def _archive_raw(exchange: str, payload: bytes, extension: str, fetched_at: datetime) -> tuple[str, str]:
+def _archive_raw(exchange: str, payload: bytes, extension: str) -> tuple[str, str]:
+    """Archive by content hash so the same exact payload is stored only once."""
     digest = sha256_bytes(payload)
     directory = _data_root() / "raw" / "security_master" / exchange.lower()
     directory.mkdir(parents=True, exist_ok=True)
-    stamp = fetched_at.strftime("%Y%m%dT%H%M%SZ")
-    path = directory / f"{exchange.lower()}_security_master_{stamp}_{digest[:12]}.{extension}"
+    path = directory / f"{exchange.lower()}_security_master_{digest}.{extension}"
     if not path.exists():
         path.write_bytes(payload)
     return str(path), digest
@@ -102,6 +102,10 @@ def _ci_get(row: dict[str, Any], *names: str) -> Any:
 def parse_nse_equity_master(payload: bytes) -> tuple[list[dict], list[dict]]:
     text = payload.decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(text))
+    headers = {str(name).strip().lower() for name in (reader.fieldnames or [])}
+    if "symbol" not in headers or not ({"isin number", "isin"} & headers):
+        raise ValueError("NSE security-master payload is missing required SYMBOL/ISIN headers")
+
     valid: list[dict] = []
     rejected: list[dict] = []
 
@@ -234,7 +238,7 @@ def _collect(
 ) -> dict:
     fetched_at = _utc_now()
     payload = fetcher(timeout=timeout)
-    archive_path, digest = _archive_raw(exchange, payload, extension, fetched_at)
+    archive_path, digest = _archive_raw(exchange, payload, extension)
 
     upsert_source(
         source_key,
@@ -255,6 +259,11 @@ def _collect(
     )
 
     rows, rejected = parser(payload)
+    if not rows:
+        raise ValueError(
+            f"{exchange} security-master parsed zero valid rows; raw payload was archived but identity store was not modified"
+        )
+
     write_stats = bulk_upsert_listings(
         rows,
         source_key=source_key,
