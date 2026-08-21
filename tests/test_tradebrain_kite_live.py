@@ -5,7 +5,7 @@ import os
 import struct
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from backend.tradebrain.kite_history_range import planned_kite_chunks
@@ -23,7 +23,7 @@ class KiteBinaryProtocolTests(unittest.TestCase):
     def _quote_frame(self) -> bytes:
         packet = bytearray(44)
         struct.pack_into(">I", packet, 0, 123456)
-        struct.pack_into(">i", packet, 4, 329110)   # 3291.10
+        struct.pack_into(">i", packet, 4, 329110)
         struct.pack_into(">I", packet, 8, 7)
         struct.pack_into(">i", packet, 12, 328950)
         struct.pack_into(">I", packet, 16, 100000)
@@ -119,6 +119,48 @@ class PreferredSourcePolicyTests(unittest.TestCase):
         self.assertTrue(out["fallback_used"])
         self.assertEqual(out["fallback_source"], "YAHOO_FINANCE_VIA_YFINANCE")
         self.assertIn("vendor unavailable", out["fallback_reason"])
+
+
+class TradingAgentsPriceContractTests(unittest.TestCase):
+    def test_default_agent_price_and_indicator_vendors_are_tradebrain(self):
+        from tradingagents.default_config import DEFAULT_CONFIG
+        self.assertEqual(DEFAULT_CONFIG["data_vendors"]["core_stock_apis"], "tradebrain")
+        self.assertEqual(DEFAULT_CONFIG["data_vendors"]["technical_indicators"], "tradebrain")
+
+    def test_agent_stock_data_preserves_source_provenance(self):
+        from tradingagents.dataflows.tradebrain_market import get_tradebrain_stock_data
+        bars = [
+            {"ts_open": "2026-08-01T03:45:00+00:00", "open": 100, "high": 102, "low": 99, "close": 101, "volume": 1000},
+            {"ts_open": "2026-08-02T03:45:00+00:00", "open": 101, "high": 103, "low": 100, "close": 102, "volume": 1100},
+        ]
+        with patch("tradingagents.dataflows.tradebrain_market.sync_preferred_history", return_value={
+            "series_id": "s1", "interval": "1d", "source_key": "ZERODHA_KITE_CONNECT_MARKET_DATA_ONLY", "fallback_used": False
+        }), patch("tradingagents.dataflows.tradebrain_market.query_bars", return_value=bars):
+            text = get_tradebrain_stock_data("BSE.NS", "2026-08-01", "2026-08-03")
+        self.assertIn("Trade Brain source: ZERODHA_KITE_CONNECT_MARKET_DATA_ONLY", text)
+        self.assertIn("Yahoo fallback used: false", text)
+        self.assertIn("2026-08-01", text)
+
+    def test_indicator_is_calculated_from_same_audited_price_rows(self):
+        from tradingagents.dataflows.tradebrain_market import get_tradebrain_indicator
+        start = datetime(2026, 7, 1, 3, 45, tzinfo=timezone.utc)
+        bars = []
+        for idx in range(35):
+            price = 100 + idx * 0.5
+            bars.append({
+                "ts_open": (start + timedelta(days=idx)).isoformat(),
+                "open": price,
+                "high": price + 1,
+                "low": price - 1,
+                "close": price + 0.25,
+                "volume": 1000 + idx,
+            })
+        with patch("tradingagents.dataflows.tradebrain_market.sync_preferred_history", return_value={
+            "series_id": "s1", "interval": "1d", "source_key": "ZERODHA_KITE_CONNECT_MARKET_DATA_ONLY", "fallback_used": False
+        }), patch("tradingagents.dataflows.tradebrain_market.query_bars", return_value=bars):
+            text = get_tradebrain_indicator("BSE.NS", "rsi", "2026-08-04", 5)
+        self.assertIn("Calculated from Trade Brain audited daily OHLCV", text)
+        self.assertIn("ZERODHA_KITE_CONNECT_MARKET_DATA_ONLY", text)
 
 
 if __name__ == "__main__":
