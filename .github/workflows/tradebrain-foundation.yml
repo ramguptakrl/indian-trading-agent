@@ -12,6 +12,7 @@ on:
       - "tradingagents/agents/trader/trader.py"
       - "tradingagents/agents/managers/portfolio_manager.py"
       - "tests/test_tradebrain_*.py"
+      - "pyproject.toml"
       - ".github/workflows/tradebrain-foundation.yml"
   push:
     branches:
@@ -26,6 +27,7 @@ on:
       - "tradingagents/agents/trader/trader.py"
       - "tradingagents/agents/managers/portfolio_manager.py"
       - "tests/test_tradebrain_*.py"
+      - "pyproject.toml"
       - ".github/workflows/tradebrain-foundation.yml"
 
 jobs:
@@ -37,7 +39,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install minimal test dependencies
-        run: python -m pip install "pydantic>=2,<3" "requests>=2.32"
+        run: python -m pip install "pydantic>=2,<3" "requests>=2.32" "pypdf>=5,<7" "tzdata>=2025.2"
       - name: Compile Trade Brain integration files
         run: >-
           python -m compileall -q
