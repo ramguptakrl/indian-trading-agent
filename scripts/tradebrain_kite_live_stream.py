@@ -15,9 +15,12 @@ import os
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+load_dotenv(ROOT / ".env", override=False)
 
 from backend.tradebrain.kite_data import KiteDataOnlyClient
 from backend.tradebrain.kite_stream import KiteMarketDataStream, upsert_latest_kite_quote
