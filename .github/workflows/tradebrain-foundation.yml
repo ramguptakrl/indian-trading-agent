@@ -9,10 +9,16 @@ on:
       - "backend/routers/tradebrain_phase4.py"
       - "backend/routers/tradebrain_phase5.py"
       - "backend/routers/tradebrain_phase6.py"
+      - "backend/routers/tradebrain_phase7.py"
+      - "backend/routers/tradebrain_phase8.py"
+      - "backend/routers/tradebrain_phase9.py"
+      - "backend/routers/tradebrain_phase10.py"
+      - "backend/routers/analysis.py"
       - "backend/routers/recommender.py"
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
       - "tradingagents/default_config.py"
+      - "tradingagents/graph/signal_processing.py"
       - "tradingagents/agents/trader/trader.py"
       - "tradingagents/agents/managers/portfolio_manager.py"
       - "tests/test_tradebrain_*.py"
@@ -21,6 +27,7 @@ on:
       - "scripts/tradebrain_phase4_smoke.py"
       - "scripts/tradebrain_phase5_smoke.py"
       - "scripts/tradebrain_phase6_smoke.py"
+      - "scripts/tradebrain_phase10_smoke.py"
       - "pyproject.toml"
       - ".github/workflows/tradebrain-foundation.yml"
   push:
@@ -33,10 +40,16 @@ on:
       - "backend/routers/tradebrain_phase4.py"
       - "backend/routers/tradebrain_phase5.py"
       - "backend/routers/tradebrain_phase6.py"
+      - "backend/routers/tradebrain_phase7.py"
+      - "backend/routers/tradebrain_phase8.py"
+      - "backend/routers/tradebrain_phase9.py"
+      - "backend/routers/tradebrain_phase10.py"
+      - "backend/routers/analysis.py"
       - "backend/routers/recommender.py"
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
       - "tradingagents/default_config.py"
+      - "tradingagents/graph/signal_processing.py"
       - "tradingagents/agents/trader/trader.py"
       - "tradingagents/agents/managers/portfolio_manager.py"
       - "tests/test_tradebrain_*.py"
@@ -45,6 +58,7 @@ on:
       - "scripts/tradebrain_phase4_smoke.py"
       - "scripts/tradebrain_phase5_smoke.py"
       - "scripts/tradebrain_phase6_smoke.py"
+      - "scripts/tradebrain_phase10_smoke.py"
       - "pyproject.toml"
       - ".github/workflows/tradebrain-foundation.yml"
 
@@ -73,12 +87,19 @@ jobs:
           backend/routers/tradebrain_phase4.py
           backend/routers/tradebrain_phase5.py
           backend/routers/tradebrain_phase6.py
+          backend/routers/tradebrain_phase7.py
+          backend/routers/tradebrain_phase8.py
+          backend/routers/tradebrain_phase9.py
+          backend/routers/tradebrain_phase10.py
+          backend/routers/analysis.py
           backend/app.py
           scripts/tradebrain_phase2_smoke.py
           scripts/tradebrain_phase3_smoke.py
           scripts/tradebrain_phase4_smoke.py
           scripts/tradebrain_phase5_smoke.py
           scripts/tradebrain_phase6_smoke.py
+          scripts/tradebrain_phase10_smoke.py
+          tradingagents/graph/signal_processing.py
           tradingagents/agents/trader/trader.py
           tradingagents/agents/managers/portfolio_manager.py
       - name: Run Trade Brain tests
@@ -98,3 +119,6 @@ jobs:
       - name: Live Phase 6 resident net-cost paper smoke (observational)
         continue-on-error: true
         run: python scripts/tradebrain_phase6_smoke.py
+      - name: Live Phase 10 calendar + BSE final advisory smoke (observational)
+        continue-on-error: true
+        run: python scripts/tradebrain_phase10_smoke.py
