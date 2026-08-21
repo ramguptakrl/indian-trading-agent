@@ -4,10 +4,9 @@ The existing multi-agent system may research, debate, rank, and propose ideas. T
 module is the final deterministic gate for a structured trade plan. It deliberately
 does not place orders and cannot be overridden by an LLM response.
 
-Phase 6 active product modes are INTRADAY and SWING. Historical DAY and
-SWING_POSITION values remain accepted as compatibility aliases only. TradePlan
-normalizes active labels to the legacy storage labels so Phases 0-5 replay rows stay
-compatible without destructive migration; GateResult exposes the active label.
+Active product modes are INTRADAY and SWING. Historical DAY and SWING_POSITION
+values remain accepted as compatibility aliases only. Human-approved Phase-5 soft
+R:R versions may change the advisory WAIT preference, but never any hard rule.
 """
 
 from __future__ import annotations
@@ -18,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, field_validator
 
+from backend.tradebrain.soft_runtime import effective_reward_risk_preference
 from backend.tradebrain.trade_modes import CompatibleTradeMode, to_active_mode, to_legacy_mode
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -62,6 +62,10 @@ class GateResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     reward_risk: float | None = None
     preferred_reward_risk: float | None = None
+    preferred_reward_risk_source: str = "DEFAULT_SOFT_PREFERENCE"
+    soft_parameter_key: str | None = None
+    soft_parameter_version: int | None = None
+    soft_parameter_registry_applied: bool = False
     evidence_count: int = 0
     evaluated_at_ist: str
 
@@ -86,7 +90,7 @@ def _reward_risk(plan: TradePlan) -> float | None:
     return reward / risk
 
 
-def evaluate_trade_plan(plan: TradePlan) -> GateResult:
+def evaluate_trade_plan(plan: TradePlan, *, db_path: str | None = None) -> GateResult:
     failures: list[str] = []
     warnings: list[str] = []
     now = _now_ist(plan.evaluated_at_ist)
@@ -122,13 +126,22 @@ def evaluate_trade_plan(plan: TradePlan) -> GateResult:
         action = "PASS"
 
     rr = _reward_risk(plan)
-    preferred = 1.0 if active_mode == "INTRADAY" else 3.0
+    soft = effective_reward_risk_preference(active_mode, db_path=db_path)
+    preferred = float(soft["value"])
+    if soft.get("warning"):
+        warnings.append(str(soft["warning"]))
+
     if rr is None:
         warnings.append("Reward/risk could not be computed from the submitted geometry")
     elif rr < preferred:
-        label = "1:1 INTRADAY starting floor" if active_mode == "INTRADAY" else "~1:3 SWING starting preference"
+        source_note = (
+            f"human-approved soft registry v{soft['version']}"
+            if soft.get("registry_applied")
+            else "documented default soft preference"
+        )
         warnings.append(
-            f"Reward/risk {rr:.2f}:1 is below the provisional {label}; treat as WAIT/research until evidence supports it"
+            f"Reward/risk {rr:.2f}:1 is below the current {active_mode} soft preference "
+            f"{preferred:.2f}:1 ({source_note}); treat as WAIT/research."
         )
 
     if not plan.evidence:
@@ -151,6 +164,10 @@ def evaluate_trade_plan(plan: TradePlan) -> GateResult:
         warnings=warnings,
         reward_risk=round(rr, 3) if rr is not None else None,
         preferred_reward_risk=preferred,
+        preferred_reward_risk_source=str(soft["source"]),
+        soft_parameter_key=str(soft["parameter_key"]),
+        soft_parameter_version=soft.get("version"),
+        soft_parameter_registry_applied=bool(soft.get("registry_applied")),
         evidence_count=len(plan.evidence),
         evaluated_at_ist=now.isoformat(),
     )
