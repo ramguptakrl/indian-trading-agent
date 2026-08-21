@@ -13,13 +13,19 @@ import Link from "next/link";
 import { PnLDialog } from "@/components/history/PnLDialog";
 
 const signalColors: Record<string, string> = {
-  BUY: "bg-green-500/20 text-green-400",
-  "STRONG BUY": "bg-green-500/20 text-green-400",
-  OVERWEIGHT: "bg-green-500/15 text-green-300",
-  HOLD: "bg-yellow-500/20 text-yellow-400",
-  SELL: "bg-red-500/20 text-red-400",
-  SHORT: "bg-red-500/20 text-red-400",
-  UNDERWEIGHT: "bg-red-500/15 text-red-300",
+  LONG_CANDIDATE: "bg-green-500/20 text-green-700",
+  SHORT_CANDIDATE: "bg-red-500/20 text-red-700",
+  EXIT_CANDIDATE: "bg-amber-500/20 text-amber-700",
+  WAIT: "bg-yellow-500/20 text-yellow-700",
+  NO_TRADE: "bg-slate-500/15 text-slate-700",
+  // Historical/upstream compatibility only.
+  BUY: "bg-green-500/20 text-green-700",
+  "STRONG BUY": "bg-green-500/20 text-green-700",
+  OVERWEIGHT: "bg-green-500/15 text-green-700",
+  HOLD: "bg-yellow-500/20 text-yellow-700",
+  SELL: "bg-red-500/20 text-red-700",
+  SHORT: "bg-red-500/20 text-red-700",
+  UNDERWEIGHT: "bg-red-500/15 text-red-700",
 };
 
 const pnlStatusColors: Record<string, string> = {
@@ -29,6 +35,8 @@ const pnlStatusColors: Record<string, string> = {
   open: "bg-blue-500/20 text-blue-700",
   pending: "bg-muted text-muted-foreground",
 };
+
+const labelText = (value: string) => value.replaceAll("_", " ");
 
 export default function HistoryPage() {
   const [analyses, setAnalyses] = useState<AnalysisHistoryItem[]>([]);
@@ -50,7 +58,6 @@ export default function HistoryPage() {
     load();
   }, []);
 
-  // Summary stats
   const closedTrades = analyses.filter((a) => a.pnl_status === "win" || a.pnl_status === "loss" || a.pnl_status === "breakeven");
   const openTrades = analyses.filter((a) => a.pnl_status === "open");
   const untracked = analyses.filter((a) => !a.pnl_status || a.pnl_status === "pending");
@@ -63,8 +70,10 @@ export default function HistoryPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold">My Trades</h1>
-          <p className="text-sm text-muted-foreground">Past analyses with P&L tracking and agent learning</p>
+          <h1 className="text-2xl font-bold">Analysis Outcomes</h1>
+          <p className="text-sm text-muted-foreground">
+            Research candidates with optional manually observed P&L. An analysis is not an executed order.
+          </p>
         </div>
         {memoryStats && memoryStats.total > 0 && (
           <Card className="border-blue-200 bg-blue-50/30">
@@ -73,7 +82,7 @@ export default function HistoryPage() {
               <div>
                 <p className="text-xs text-blue-700 font-medium">Agent Memory</p>
                 <p className="text-sm">
-                  <span className="font-semibold">{memoryStats.total}</span> lessons learned from past trades
+                  <span className="font-semibold">{memoryStats.total}</span> lessons learned from observed outcomes
                 </p>
               </div>
             </CardContent>
@@ -81,19 +90,18 @@ export default function HistoryPage() {
         )}
       </div>
 
-      {/* P&L Summary */}
       {closedTrades.length > 0 && (
         <div className="grid grid-cols-4 gap-4">
           <Card>
             <CardContent className="p-4 text-center">
-              <p className="text-xs text-muted-foreground">Win Rate</p>
+              <p className="text-xs text-muted-foreground">Observed Win Rate</p>
               <p className="text-xl font-bold">{winRate}%</p>
               <p className="text-xs text-muted-foreground">{wins}W / {losses}L</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4 text-center">
-              <p className="text-xs text-muted-foreground">Avg Return</p>
+              <p className="text-xs text-muted-foreground">Avg Observed Return</p>
               <p className={`text-xl font-bold ${totalPnl / closedTrades.length >= 0 ? "text-green-600" : "text-red-600"}`}>
                 {(totalPnl / closedTrades.length).toFixed(2)}%
               </p>
@@ -101,7 +109,7 @@ export default function HistoryPage() {
           </Card>
           <Card>
             <CardContent className="p-4 text-center">
-              <p className="text-xs text-muted-foreground">Total P&L %</p>
+              <p className="text-xs text-muted-foreground">Total Observed P&L %</p>
               <p className={`text-xl font-bold ${totalPnl >= 0 ? "text-green-600" : "text-red-600"}`}>
                 {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}%
               </p>
@@ -109,7 +117,7 @@ export default function HistoryPage() {
           </Card>
           <Card>
             <CardContent className="p-4 text-center">
-              <p className="text-xs text-muted-foreground">Closed Trades</p>
+              <p className="text-xs text-muted-foreground">Closed Outcomes</p>
               <p className="text-xl font-bold">{closedTrades.length}</p>
               {openTrades.length > 0 && <p className="text-xs text-muted-foreground">{openTrades.length} open</p>}
             </CardContent>
@@ -131,9 +139,9 @@ export default function HistoryPage() {
 
         {[
           { key: "all", data: analyses, emptyMsg: "No analyses yet" },
-          { key: "open", data: openTrades, emptyMsg: "No open trades. Enter a trade? Log it with just the entry price to mark it as open." },
-          { key: "closed", data: closedTrades, emptyMsg: "No closed trades yet. Once you exit a trade, log the exit price." },
-          { key: "untracked", data: untracked, emptyMsg: "All analyses are tracked!" },
+          { key: "open", data: openTrades, emptyMsg: "No open observed outcomes." },
+          { key: "closed", data: closedTrades, emptyMsg: "No closed observed outcomes yet." },
+          { key: "untracked", data: untracked, emptyMsg: "All analyses have an observed outcome status." },
         ].map((tab) => (
           <TabsContent key={tab.key} value={tab.key}>
             <Card>
@@ -143,12 +151,12 @@ export default function HistoryPage() {
                     <TableRow>
                       <TableHead>Date</TableHead>
                       <TableHead>Ticker</TableHead>
-                      <TableHead>Trade Date</TableHead>
-                      <TableHead>Signal</TableHead>
+                      <TableHead>Analysis Date</TableHead>
+                      <TableHead>Research Label</TableHead>
                       <TableHead className="text-right">Entry</TableHead>
                       <TableHead className="text-right">Exit</TableHead>
-                      <TableHead className="text-right">P&L</TableHead>
-                      <TableHead>Result</TableHead>
+                      <TableHead className="text-right">Observed P&L</TableHead>
+                      <TableHead>Outcome</TableHead>
                       <TableHead className="text-right">Duration</TableHead>
                       <TableHead></TableHead>
                     </TableRow>
@@ -156,9 +164,7 @@ export default function HistoryPage() {
                   <TableBody>
                     {loading ? (
                       <TableRow>
-                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
-                          Loading...
-                        </TableCell>
+                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">Loading...</TableCell>
                       </TableRow>
                     ) : tab.data.length === 0 ? (
                       <TableRow>
@@ -172,32 +178,22 @@ export default function HistoryPage() {
                     ) : (
                       tab.data.map((a: any) => (
                         <TableRow key={a.task_id}>
-                          <TableCell className="text-sm">
-                            {a.created_at ? new Date(a.created_at).toLocaleDateString() : "-"}
-                          </TableCell>
+                          <TableCell className="text-sm">{a.created_at ? new Date(a.created_at).toLocaleDateString() : "-"}</TableCell>
                           <TableCell className="font-medium">{a.ticker}</TableCell>
                           <TableCell className="text-sm">{a.trade_date}</TableCell>
                           <TableCell>
-                            <Badge variant="outline" className={signalColors[a.signal] || ""}>
-                              {a.signal}
+                            <Badge variant="outline" className={signalColors[a.signal] || "bg-slate-500/10 text-slate-700"}>
+                              {labelText(a.signal)}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-right text-sm">
-                            {a.entry_price ? `Rs.${a.entry_price}` : "-"}
-                          </TableCell>
-                          <TableCell className="text-right text-sm">
-                            {a.exit_price ? `Rs.${a.exit_price}` : "-"}
-                          </TableCell>
-                          <TableCell className={`text-right text-sm ${
-                            (a.pnl_pct || 0) >= 0 ? "text-green-600" : "text-red-600"
-                          }`}>
+                          <TableCell className="text-right text-sm">{a.entry_price ? `Rs.${a.entry_price}` : "-"}</TableCell>
+                          <TableCell className="text-right text-sm">{a.exit_price ? `Rs.${a.exit_price}` : "-"}</TableCell>
+                          <TableCell className={`text-right text-sm ${(a.pnl_pct || 0) >= 0 ? "text-green-600" : "text-red-600"}`}>
                             {a.pnl_pct != null ? `${a.pnl_pct >= 0 ? "+" : ""}${a.pnl_pct}%` : "-"}
                           </TableCell>
                           <TableCell>
                             {a.pnl_status ? (
-                              <Badge variant="outline" className={pnlStatusColors[a.pnl_status] || ""}>
-                                {a.pnl_status}
-                              </Badge>
+                              <Badge variant="outline" className={pnlStatusColors[a.pnl_status] || ""}>{a.pnl_status}</Badge>
                             ) : (
                               <span className="text-xs text-muted-foreground">-</span>
                             )}
@@ -207,9 +203,7 @@ export default function HistoryPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
-                              <Link href={`/analysis/${a.task_id}`} className="text-xs text-primary hover:underline">
-                                View
-                              </Link>
+                              <Link href={`/analysis/${a.task_id}`} className="text-xs text-primary hover:underline">View</Link>
                               <Button
                                 size="sm"
                                 variant="ghost"
@@ -217,7 +211,7 @@ export default function HistoryPage() {
                                 onClick={() => setDialog({ taskId: a.task_id, ticker: a.ticker, signal: a.signal })}
                               >
                                 <DollarSign className="h-3 w-3 mr-1" />
-                                {a.pnl_status === "open" ? "Close Trade" : a.pnl_status && a.pnl_status !== "pending" ? "Update" : "Log P&L"}
+                                {a.pnl_status === "open" ? "Close Outcome" : a.pnl_status && a.pnl_status !== "pending" ? "Update" : "Log Outcome"}
                               </Button>
                             </div>
                           </TableCell>
