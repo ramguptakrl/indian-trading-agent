@@ -37,6 +37,7 @@ on:
       - "scripts/tradebrain_phase6_smoke.py"
       - "scripts/tradebrain_phase10_smoke.py"
       - "scripts/tradebrain_bse_evidence_baseline.py"
+      - "scripts/tradebrain_kite_live_stream.py"
       - "pyproject.toml"
       - ".env.example"
       - "README.md"
@@ -81,6 +82,7 @@ on:
       - "scripts/tradebrain_phase6_smoke.py"
       - "scripts/tradebrain_phase10_smoke.py"
       - "scripts/tradebrain_bse_evidence_baseline.py"
+      - "scripts/tradebrain_kite_live_stream.py"
       - "pyproject.toml"
       - ".env.example"
       - "README.md"
@@ -103,6 +105,7 @@ jobs:
           "requests>=2.32"
           "pypdf>=5,<7"
           "tzdata>=2025.2"
+          "websockets>=13"
           "yfinance>=0.2.63"
       - name: Compile Trade Brain integration files
         run: >-
@@ -127,6 +130,7 @@ jobs:
           scripts/tradebrain_phase6_smoke.py
           scripts/tradebrain_phase10_smoke.py
           scripts/tradebrain_bse_evidence_baseline.py
+          scripts/tradebrain_kite_live_stream.py
           tradingagents/graph/signal_processing.py
           tradingagents/agents/trader/trader.py
           tradingagents/agents/managers/portfolio_manager.py
