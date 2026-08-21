@@ -43,7 +43,8 @@ def main() -> int:
         try:
             sync = sync_yahoo_history(
                 exchange="NSE", symbol="BSE", interval="5m",
-                start=(now - timedelta(days=7)).isoformat(), end=(now + timedelta(days=1)).isoformat(),
+                start=(now - timedelta(days=7)).date().isoformat(),
+                end=(now + timedelta(days=1)).date().isoformat(),
                 incremental=False, db_path=db_path,
             )
             report["sync"] = {
