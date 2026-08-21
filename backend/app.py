@@ -17,6 +17,7 @@ from backend.routers import market_data, analysis, watchlist, backtest, strategi
 from backend.settings_manager import load_api_keys_into_env, apply_llm_config_to_default
 from backend.tradebrain.store import ensure_tradebrain_schema
 from backend.tradebrain.security_store import ensure_security_master_schema
+from backend.tradebrain.corporate_event_store import ensure_corporate_event_schema
 
 
 @asynccontextmanager
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI):
     ensure_db()
     ensure_tradebrain_schema()
     ensure_security_master_schema()
+    ensure_corporate_event_schema()
     # Load API keys from DB (UI takes priority over .env)
     load_api_keys_into_env()
     # Apply saved LLM config to DEFAULT_CONFIG
@@ -34,7 +36,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Indian Market Trading Agent — Trade Brain Reframe",
     description="AI-assisted Indian-market research with a deterministic advisory-only Trade Brain policy layer",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -77,6 +79,8 @@ def health():
         "status": "ok",
         "service": "indian-trading-agent",
         "tradebrain_reframe": True,
+        "tradebrain_version": "0.3.0",
+        "corporate_event_memory": True,
         "advisory_only": True,
         "order_execution_enabled": False,
     }
