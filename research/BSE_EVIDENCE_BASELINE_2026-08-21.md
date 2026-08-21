@@ -5,6 +5,7 @@ Status: **EXPLORATORY / DESCRIPTIVE — NOT STRATEGY VALIDATION**
 Trade Brain version: `0.11.1`  
 Evidence method: `BSE_DESCRIPTIVE_EVIDENCE_BASELINE_V1`  
 Opening-gap method: `BSE_OPENING_GAP_EXPLORATION_V1`  
+Prospective method: `BSE_GAP_FIRST_HOUR_PROSPECTIVE_V1`  
 Instrument identity: `NSE:BSE` / ISIN `INE118H01025`  
 Market-data source: `YAHOO_FINANCE_VIA_YFINANCE` / `BSE.NS`  
 Source official: **false**  
@@ -14,7 +15,7 @@ This note freezes the first research baseline after the framework build. It does
 
 ## Audited coverage
 
-Latest evidence run: GitHub Actions `#222` (`32528764144`).
+Final evidence run: GitHub Actions `#237` (`32529415612`).
 
 - Daily: **2,361** completed bars, 2017-02-03 through 2026-08-20.
 - 1-hour: **3,280** bars from the vendor's rolling intraday window.
@@ -29,23 +30,27 @@ Latest evidence run: GitHub Actions `#222` (`32528764144`).
 
 Evidence report SHA-256:
 
-`ce75a7614a5f247b1951f19a566b5844f9c9886d2d83e8fc0338b8e6d9f4078c`
+`adeb5ebeb991319ab2a477c1334f7eecd654c336eb2273422d92f960b1b23481`
 
 Daily source snapshot SHA-256:
 
-`6d5d8b958807ccfaab64e45dd191eff1c1918557bedb49417b60b8e0c8d530a8`
+`4338474bd6cd1203074d7a3e4fa6903505dfcb7b38305dfbe6659dc28a683e59`
 
 1-hour source snapshot SHA-256:
 
-`b1d8ccd4d8738589629ef3a7244d66ea80a3644c3de5288a28f84c403d83b434`
+`95841c7a3247afc0f56b2985163cb22fa32ba73b99e94fb9da1dfc8b68c10c15`
 
 5-minute source snapshot SHA-256:
 
-`3456062a66dc1b639ee6ab9c44912d1548cefb3c0ec26460881b4ed944991108`
+`916e1c8f370bf9415613a50a00f2ab6a0c1bff2ac2da3da1b657baa6b39a0184`
 
-Workflow evidence artifact ZIP SHA-256:
+Workflow evidence artifact SHA-256:
 
-`e990c877513b52b0caccbe02797b204d1a136a8132143d6c2c75cb9c6cfd09d6`
+`3c72b7308f07b3a571ae13f9f50d1bdf5b101d804afd055271464e77c72b380e`
+
+Official NSE 2026 calendar SHA-256 used by the prospective collector:
+
+`798c545acc5351eb9ed84f353c1fcc665a26967426e3761b7097e7f3c7042424`
 
 ## Long-history daily behavior
 
@@ -123,6 +128,25 @@ The yearly cohorts are visibly non-stationary. For example, >=1.0% GAP_UP close-
 
 So the full-history aggregate can easily hide regime/time variation. Using the same sample to discover a threshold and then calling its historical frequency a validated edge would be data snooping.
 
+## Prospective Hypothesis 001 is now frozen
+
+The first future-only comparison is documented separately in `research/BSE_PROSPECTIVE_HYPOTHESIS_001.md`.
+
+It compares a fixed >=1% blind gap-direction benchmark against a first-45-minute confirmation filter. Both arms use the same 10:00 entry timing, first-45-minute stop, 1.0R target, 15:15 hard exit, ₹100,000 notional-equivalent sizing, and resident transaction costs.
+
+Validation can use **only sessions strictly after 2026-08-21**. The collector does not require the current session's 15:30 daily candle: it uses the completed 09:15 five-minute open plus the previous completed daily close, so evaluation at the 15:15 hard-exit boundary does not leak the future daily close.
+
+As of final run #237:
+
+- prospective eligible sessions: **0**;
+- benchmark entries: **0**;
+- challenger entries: **0**;
+- decision: **`NEEDS_MORE_DATA`**;
+- automatic promotion: **false**;
+- human approval required: **true**.
+
+Zero is the correct result because no post-freeze trading session had occurred in the audited data. Historical observations through 2026-08-21 are deliberately excluded from prospective validation.
+
 ## Research conclusion
 
 The first evidence pack supports three conservative conclusions:
@@ -131,9 +155,7 @@ The first evidence pack supports three conservative conclusions:
 2. Recent 5-minute data confirms the opening hour carries substantially larger bar ranges than later periods, but the strict full-session sample is still below the 30-session walk-forward readiness threshold.
 3. Opening-gap behavior is not stable enough across years to justify a blind fixed gap-fade or gap-continuation rule from this exploratory sample alone.
 
-## Next evidence protocol
-
-The next hypothesis must be frozen **after** this evidence timestamp and evaluated only on future/untouched observations. The preferred first hypothesis is not "gap up means buy" or "gap up means fade". It is whether **first-hour confirmation improves a fixed gap-direction benchmark after resident transaction costs**.
+The next evidence is now prospective rather than retrospective optimization. Hypothesis 001 cannot reach review readiness until at least **30 future eligible gap sessions**, **20 challenger entries**, ambiguity <=10%, and the predeclared net-performance/risk criteria are met.
 
 No historical record in this note is eligible for direct Phase-5 promotion.
 
