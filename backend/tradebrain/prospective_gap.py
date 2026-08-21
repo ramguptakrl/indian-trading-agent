@@ -6,6 +6,11 @@ fixed blind gap-direction benchmark against a first-45-minute confirmation chall
 using audited 5-minute bars, verified exchange calendar state, strict threshold
 ordering, the protected 15:15 INTRADAY exit, and resident transaction costs.
 
+Important replay rule: the current session's daily candle does not close until 15:30,
+so a 15:15 evaluation must not read it. The current session open comes from the audited
+09:15 five-minute bar; the reference close comes from the most recent completed daily
+bar strictly before that session date.
+
 Nothing here authorizes a trade or promotes a runtime rule.
 """
 
@@ -37,6 +42,10 @@ FIXED_NOTIONAL_RUPEES = 100_000.0
 MIN_ELIGIBLE_FOR_REVIEW = 30
 MIN_CHALLENGER_ENTRIES_FOR_REVIEW = 20
 MAX_AMBIGUITY_RATE_PCT = 10.0
+_EXPECTED_FIRST_WINDOW_OPENS = [
+    time(9, 15), time(9, 20), time(9, 25), time(9, 30), time(9, 35),
+    time(9, 40), time(9, 45), time(9, 50), time(9, 55),
+]
 
 
 def _db_path(db_path: str | None) -> str:
@@ -78,7 +87,8 @@ def ensure_prospective_gap_schema(db_path: str | None = None) -> None:
             """
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_tb_prospective_gap_date ON tb_prospective_gap_observations(hypothesis_id, session_date)"
+            "CREATE INDEX IF NOT EXISTS idx_tb_prospective_gap_date "
+            "ON tb_prospective_gap_observations(hypothesis_id, session_date)"
         )
 
 
@@ -93,47 +103,54 @@ def _bar_day(bar: dict[str, Any]) -> date:
     return _local_dt(bar["ts_open"]).date()
 
 
-def _same_verified_era(previous: dict[str, Any], current: dict[str, Any]) -> bool:
-    left = previous.get("era_id")
-    right = current.get("era_id")
+def _bar_open_time(bar: dict[str, Any]) -> time:
+    return _local_dt(bar["ts_open"]).time().replace(tzinfo=None)
+
+
+def _bar_close_time(bar: dict[str, Any]) -> time:
+    return _local_dt(bar["ts_close"]).time().replace(tzinfo=None)
+
+
+def _same_verified_era(previous_daily: dict[str, Any], current_intraday: dict[str, Any]) -> bool:
+    left = previous_daily.get("era_id")
+    right = current_intraday.get("era_id")
     return bool(left and right and left == right)
 
 
-def _expected_first_window_opens() -> list[time]:
-    return [time(9, 15 + 5 * i) if 15 + 5 * i < 60 else time(10, (15 + 5 * i) - 60) for i in range(9)]
+def _previous_completed_daily(
+    daily_bars: list[dict[str, Any]], session_day: date
+) -> dict[str, Any] | None:
+    """Return newest completed daily bar strictly before the candidate session date."""
+    candidates = [bar for bar in daily_bars if _bar_day(bar) < session_day]
+    return candidates[-1] if candidates else None
 
 
 def _first_window(session_bars: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str | None]:
-    xs = []
-    for bar in session_bars:
-        opened = _local_dt(bar["ts_open"])
-        closed = _local_dt(bar["ts_close"])
-        if opened.time() >= time(9, 15) and closed.time() <= DECISION_TIME:
-            xs.append(bar)
+    xs = [
+        bar for bar in session_bars
+        if _bar_open_time(bar) >= time(9, 15) and _bar_close_time(bar) <= DECISION_TIME
+    ]
     xs.sort(key=lambda b: b["ts_open"])
-    expected = [time(9, 15), time(9, 20), time(9, 25), time(9, 30), time(9, 35), time(9, 40), time(9, 45), time(9, 50), time(9, 55)]
-    opens = [_local_dt(bar["ts_open"]).time().replace(tzinfo=None) for bar in xs]
-    if opens != expected:
+    opens = [_bar_open_time(bar) for bar in xs]
+    if opens != _EXPECTED_FIRST_WINDOW_OPENS:
         return xs, "INCOMPLETE_0915_TO_1000_WINDOW"
-    if _local_dt(xs[-1]["ts_close"]).time().replace(tzinfo=None) != DECISION_TIME:
+    if _bar_close_time(xs[-1]) != DECISION_TIME:
         return xs, "FIRST_WINDOW_DOES_NOT_CLOSE_AT_1000"
     return xs, None
 
 
-def _entry_and_following_bars(session_bars: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None]:
-    eligible = []
-    for bar in sorted(session_bars, key=lambda b: b["ts_open"]):
-        opened = _local_dt(bar["ts_open"]).time().replace(tzinfo=None)
-        closed = _local_dt(bar["ts_close"]).time().replace(tzinfo=None)
-        if opened >= DECISION_TIME and closed <= HARD_EXIT_TIME:
-            eligible.append(bar)
+def _entry_and_following_bars(
+    session_bars: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None]:
+    eligible = [
+        bar for bar in sorted(session_bars, key=lambda b: b["ts_open"])
+        if _bar_open_time(bar) >= DECISION_TIME and _bar_close_time(bar) <= HARD_EXIT_TIME
+    ]
     if not eligible:
         return None, [], "NO_BAR_AVAILABLE_AT_OR_AFTER_1000_BEFORE_HARD_EXIT"
-    first_open = _local_dt(eligible[0]["ts_open"]).time().replace(tzinfo=None)
-    if first_open != DECISION_TIME:
+    if _bar_open_time(eligible[0]) != DECISION_TIME:
         return None, eligible, "ENTRY_BAR_AT_1000_MISSING"
-    last_close = _local_dt(eligible[-1]["ts_close"]).time().replace(tzinfo=None)
-    if last_close < HARD_EXIT_TIME:
+    if _bar_close_time(eligible[-1]) < HARD_EXIT_TIME:
         return eligible[0], eligible, "DATA_ENDS_BEFORE_1515_HARD_EXIT"
     return eligible[0], eligible, None
 
@@ -167,9 +184,9 @@ def _resolve_arm(
 
     observed: list[dict[str, Any]] = []
     outcome = "NEITHER"
-    exit_price = None
-    exit_ts = None
-    ambiguity_reason = None
+    exit_price: float | None = None
+    exit_ts: str | None = None
+    ambiguity_reason: str | None = None
 
     for bar in bars:
         observed.append(bar)
@@ -231,7 +248,11 @@ def _resolve_arm(
         "mae_r": round(mae_r, 6),
     }
     if exit_price is not None:
-        gross_r = ((exit_price - entry_price) / risk) if direction == "LONG" else ((entry_price - exit_price) / risk)
+        gross_r = (
+            (exit_price - entry_price) / risk
+            if direction == "LONG"
+            else (entry_price - exit_price) / risk
+        )
         result["gross_r"] = round(gross_r, 6)
         result["costs"] = calculate_equity_trade_costs(
             mode="INTRADAY",
@@ -318,11 +339,18 @@ def collect_prospective_gap_observations(
     if notional_rupees <= 0:
         raise ValueError("notional_rupees must be positive")
 
-    cutoff = datetime.now(timezone.utc) if as_of is None else (datetime.fromisoformat(as_of) if isinstance(as_of, str) else as_of)
+    cutoff = (
+        datetime.now(timezone.utc)
+        if as_of is None
+        else (datetime.fromisoformat(as_of) if isinstance(as_of, str) else as_of)
+    )
     if cutoff.tzinfo is None:
         cutoff = cutoff.replace(tzinfo=timezone.utc)
     cutoff_iso = cutoff.astimezone(timezone.utc).isoformat()
 
+    # At 15:15 the current daily candle is still open until 15:30 and must remain
+    # invisible. Candidate dates therefore come from completed 5m evidence, while the
+    # reference close comes from the newest completed daily bar before that date.
     daily = query_bars(series_id, "1d", as_of=cutoff_iso, limit=500000, db_path=db_path)
     intraday = query_bars(series_id, "5m", as_of=cutoff_iso, limit=500000, db_path=db_path)
     intraday_by_day: dict[date, list[dict[str, Any]]] = {}
@@ -331,18 +359,36 @@ def collect_prospective_gap_observations(
 
     observations: list[dict[str, Any]] = []
     skipped = Counter()
-    for idx in range(1, len(daily)):
-        previous = daily[idx - 1]
-        current = daily[idx]
-        session_day = _bar_day(current)
-        if session_day <= FREEZE_DATE:
+    candidate_days = sorted(day for day in intraday_by_day if day > FREEZE_DATE)
+
+    for session_day in candidate_days:
+        session_bars = sorted(intraday_by_day[session_day], key=lambda b: b["ts_open"])
+        window, error = _first_window(session_bars)
+        if error:
+            skipped[error] += 1
             continue
-        if not _same_verified_era(previous, current):
+
+        entry_bar, follow_bars, error = _entry_and_following_bars(session_bars)
+        if error:
+            skipped[error] += 1
+            continue
+        assert entry_bar is not None
+
+        previous = _previous_completed_daily(daily, session_day)
+        if previous is None:
+            skipped["PREVIOUS_COMPLETED_DAILY_BAR_MISSING"] += 1
+            continue
+        if not _same_verified_era(previous, window[0]):
             skipped["PRICE_ERA_NOT_COMPARABLE"] += 1
             continue
+
         if require_verified_calendar:
             calendar = session_for_date(session_day, exchange="NSE", segment="CM", db_path=db_path)
-            if not calendar.get("calendar_verified") or not calendar.get("is_trading_session") or not calendar.get("timing_verified"):
+            if (
+                not calendar.get("calendar_verified")
+                or not calendar.get("is_trading_session")
+                or not calendar.get("timing_verified")
+            ):
                 skipped["CALENDAR_NOT_VERIFIED_REGULAR_OPEN"] += 1
                 continue
             if calendar.get("session_type") != "REGULAR":
@@ -350,26 +396,16 @@ def collect_prospective_gap_observations(
                 continue
 
         previous_close = float(previous["close"])
-        session_open = float(current["open"])
+        session_open = float(window[0]["open"])
         if previous_close <= 0 or session_open <= 0:
-            skipped["INVALID_DAILY_PRICE"] += 1
+            skipped["INVALID_PRICE"] += 1
             continue
+
         gap_pct = (session_open / previous_close - 1.0) * 100.0
         if abs(gap_pct) < MIN_ABS_GAP_PCT:
             continue
         direction = "LONG" if gap_pct > 0 else "SHORT"
         gap_direction = "GAP_UP" if gap_pct > 0 else "GAP_DOWN"
-
-        session_bars = intraday_by_day.get(session_day, [])
-        window, error = _first_window(session_bars)
-        if error:
-            skipped[error] += 1
-            continue
-        entry_bar, follow_bars, error = _entry_and_following_bars(session_bars)
-        if error:
-            skipped[error] += 1
-            continue
-        assert entry_bar is not None
 
         if direction == "LONG":
             stop = min(float(bar["low"]) for bar in window)
@@ -424,6 +460,7 @@ def collect_prospective_gap_observations(
             "previous_close": round(previous_close, 6),
             "session_open": round(session_open, 6),
             "decision_time_ist": "10:00",
+            "daily_current_session_candle_used": False,
             "confirmation_passed": confirmation_passed,
             "confirmation_reason": confirmation_reason,
             "benchmark": benchmark,
@@ -441,6 +478,7 @@ def collect_prospective_gap_observations(
         "method_version": METHOD_VERSION,
         "freeze_date": FREEZE_DATE.isoformat(),
         "validation_rule": "Only session dates strictly after freeze_date count",
+        "current_daily_candle_required": False,
         "as_of": cutoff_iso,
         "series_id": series_id,
         "eligible_observations": len(observations),
@@ -461,7 +499,10 @@ def _arm_summary(observations: list[dict[str, Any]], arm: str) -> dict[str, Any]
     rows = [item[arm] for item in observations]
     entered = [row for row in rows if row.get("entered")]
     outcomes = Counter(str(row.get("outcome")) for row in entered)
-    clean = [row for row in entered if row.get("outcome") in {"TP_FIRST", "SL_FIRST", "NEITHER"}]
+    clean = [
+        row for row in entered
+        if row.get("outcome") in {"TP_FIRST", "SL_FIRST", "NEITHER"}
+    ]
     net_values = [float(row.get("net_pnl") or 0.0) for row in rows]
     clean_r = [float(row["gross_r"]) for row in clean if row.get("gross_r") is not None]
     mae = [float(row["mae_r"]) for row in clean if row.get("mae_r") is not None]
@@ -474,7 +515,9 @@ def _arm_summary(observations: list[dict[str, Any]], arm: str) -> dict[str, Any]
         "median_net_pnl_per_eligible_session": round(median(net_values), 2) if net_values else None,
         "median_clean_gross_r": round(median(clean_r), 6) if clean_r else None,
         "median_clean_mae_r": round(median(mae), 6) if mae else None,
-        "ambiguity_rate_pct_of_entries": round(ambiguous / len(entered) * 100.0, 3) if entered else None,
+        "ambiguity_rate_pct_of_entries": (
+            round(ambiguous / len(entered) * 100.0, 3) if entered else None
+        ),
     }
 
 
@@ -496,7 +539,9 @@ def summarize_prospective_gap_observations(observations: list[dict[str, Any]]) -
     }
 
 
-def stored_prospective_gap_observations(series_id: str, *, db_path: str | None = None) -> list[dict[str, Any]]:
+def stored_prospective_gap_observations(
+    series_id: str, *, db_path: str | None = None
+) -> list[dict[str, Any]]:
     ensure_prospective_gap_schema(db_path)
     with _connect(db_path) as conn:
         rows = conn.execute(
