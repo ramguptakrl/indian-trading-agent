@@ -8,6 +8,7 @@ on:
       - "backend/routers/tradebrain_phase3.py"
       - "backend/routers/tradebrain_phase4.py"
       - "backend/routers/tradebrain_phase5.py"
+      - "backend/routers/tradebrain_phase6.py"
       - "backend/routers/recommender.py"
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
@@ -19,6 +20,7 @@ on:
       - "scripts/tradebrain_phase3_smoke.py"
       - "scripts/tradebrain_phase4_smoke.py"
       - "scripts/tradebrain_phase5_smoke.py"
+      - "scripts/tradebrain_phase6_smoke.py"
       - "pyproject.toml"
       - ".github/workflows/tradebrain-foundation.yml"
   push:
@@ -30,6 +32,7 @@ on:
       - "backend/routers/tradebrain_phase3.py"
       - "backend/routers/tradebrain_phase4.py"
       - "backend/routers/tradebrain_phase5.py"
+      - "backend/routers/tradebrain_phase6.py"
       - "backend/routers/recommender.py"
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
@@ -41,6 +44,7 @@ on:
       - "scripts/tradebrain_phase3_smoke.py"
       - "scripts/tradebrain_phase4_smoke.py"
       - "scripts/tradebrain_phase5_smoke.py"
+      - "scripts/tradebrain_phase6_smoke.py"
       - "pyproject.toml"
       - ".github/workflows/tradebrain-foundation.yml"
 
@@ -68,11 +72,13 @@ jobs:
           backend/routers/tradebrain_phase3.py
           backend/routers/tradebrain_phase4.py
           backend/routers/tradebrain_phase5.py
+          backend/routers/tradebrain_phase6.py
           backend/app.py
           scripts/tradebrain_phase2_smoke.py
           scripts/tradebrain_phase3_smoke.py
           scripts/tradebrain_phase4_smoke.py
           scripts/tradebrain_phase5_smoke.py
+          scripts/tradebrain_phase6_smoke.py
           tradingagents/agents/trader/trader.py
           tradingagents/agents/managers/portfolio_manager.py
       - name: Run Trade Brain tests
@@ -89,3 +95,6 @@ jobs:
       - name: Live Phase 5 frozen challenger smoke (observational)
         continue-on-error: true
         run: python scripts/tradebrain_phase5_smoke.py
+      - name: Live Phase 6 resident net-cost paper smoke (observational)
+        continue-on-error: true
+        run: python scripts/tradebrain_phase6_smoke.py
