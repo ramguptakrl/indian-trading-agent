@@ -35,9 +35,48 @@ export const runAnalysis = (data: {
 }) => fetchAPI(`/api/analysis/run`, { method: "POST", body: JSON.stringify(data) });
 export const getAnalysisResult = (taskId: string) => fetchAPI(`/api/analysis/${taskId}`);
 export const getAnalysisHistory = (limit = 50) => fetchAPI(`/api/analysis/history/list?limit=${limit}`);
-export const updatePnL = (taskId: string, data: { entry_price: number; exit_price: number; reflect?: boolean }) =>
+export const updatePnL = (taskId: string, data: { entry_price: number; exit_price?: number; reflect?: boolean }) =>
   fetchAPI(`/api/analysis/${taskId}/pnl`, { method: "PUT", body: JSON.stringify(data) });
 export const getMemoryStats = () => fetchAPI(`/api/analysis/memory/stats`);
+
+// Actual manual trades — records what the human did; never places broker orders.
+export const createActualTrade = (data: {
+  ticker: string;
+  exchange: "NSE" | "BSE";
+  mode: "INTRADAY" | "SWING";
+  direction: "LONG" | "SHORT";
+  quantity: number;
+  entry_price: number;
+  entry_timestamp?: string;
+  advisory_task_id?: string;
+  stop_loss?: number;
+  take_profit?: number;
+  broker_order_ref?: string;
+  notes?: string;
+}) => fetchAPI(`/api/tradebrain/actual-trades`, { method: "POST", body: JSON.stringify(data) });
+
+export const listActualTrades = (status?: "OPEN" | "PARTIALLY_CLOSED" | "CLOSED") =>
+  fetchAPI(`/api/tradebrain/actual-trades${status ? `?status=${status}` : ""}`);
+
+export const getActualTrade = (tradeId: string) =>
+  fetchAPI(`/api/tradebrain/actual-trades/${tradeId}`);
+
+export const getActualTradeStats = () => fetchAPI(`/api/tradebrain/actual-trades/stats`);
+
+export const closeActualTrade = (tradeId: string, data: {
+  exit_price: number;
+  quantity?: number;
+  exit_timestamp?: string;
+  actual_charges_override?: number;
+  broker_order_ref?: string;
+  notes?: string;
+}) => fetchAPI(`/api/tradebrain/actual-trades/${tradeId}/close`, { method: "POST", body: JSON.stringify(data) });
+
+export const markActualTrade = (tradeId: string, currentPrice: number, source = "UI_CURRENT_QUOTE") =>
+  fetchAPI(`/api/tradebrain/actual-trades/${tradeId}/mark`, {
+    method: "POST",
+    body: JSON.stringify({ current_price: currentPrice, source }),
+  });
 
 // Watchlist
 export const getWatchlist = () => fetchAPI(`/api/watchlist`);
@@ -254,7 +293,7 @@ export const getPerformanceGap = (universe = "nifty50", lookbackDays = 60, thres
 export const getPerformanceVolume = (universe = "nifty50", lookbackDays = 60, multiplier = 2.0) =>
   fetchAPI(`/api/performance/volume?universe=${universe}&lookback_days=${lookbackDays}&volume_multiplier=${multiplier}`);
 export const getPerformanceBreakout = (universe = "nifty50", lookbackDays = 60, window = 20) =>
-  fetchAPI(`/api/performance/breakout?universe=${universe}&lookback_days=${lookbackDays}&breakout_window=${window}`);
+  fetchAPI(`/api/performance/breakout?universe=${universe}&lookback_days=${lookbackDays}&window=${window}`);
 export const getPerformanceSRBounce = (universe = "nifty50", lookbackDays = 90) =>
   fetchAPI(`/api/performance/sr-bounce?universe=${universe}&lookback_days=${lookbackDays}`);
 
