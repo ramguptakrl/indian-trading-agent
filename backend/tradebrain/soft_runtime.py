@@ -10,7 +10,6 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from backend.tradebrain.challenger_store import list_soft_parameter_versions
 from backend.tradebrain.trade_modes import to_active_mode
 
 DEFAULT_SOFT_RUNTIME = {
@@ -38,7 +37,12 @@ def _valid_positive_number(value: Any) -> float | None:
 
 
 def effective_reward_risk_preference(mode: str, *, db_path: str | None = None) -> dict[str, Any]:
-    """Return the effective soft R:R preference with full audit provenance."""
+    """Return the effective soft R:R preference with full audit provenance.
+
+    The Phase-5 store import is deliberately lazy because the base Trade Brain store
+    imports policy.py. Keeping this dependency one-way at module import time avoids a
+    policy -> challenger store -> security store -> policy cycle.
+    """
 
     active_mode = to_active_mode(mode)
     spec = DEFAULT_SOFT_RUNTIME[active_mode]
@@ -59,6 +63,8 @@ def effective_reward_risk_preference(mode: str, *, db_path: str | None = None) -
     }
 
     try:
+        from backend.tradebrain.challenger_store import list_soft_parameter_versions
+
         versions = list_soft_parameter_versions(
             parameter_key=spec["parameter_key"], active_only=True, db_path=db_path
         )
@@ -74,8 +80,6 @@ def effective_reward_risk_preference(mode: str, *, db_path: str | None = None) -
     if not matches:
         return result
 
-    # There should be one ACTIVE row per key/scope. If storage is corrupted, refuse to
-    # guess which value wins and retain the documented default.
     if len(matches) != 1:
         result["warning"] = f"Expected one ACTIVE soft version; found {len(matches)}. Default retained."
         return result
