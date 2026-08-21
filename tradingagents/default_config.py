@@ -17,12 +17,12 @@ DEFAULT_CONFIG = {
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
     "max_recur_limit": 100,
-    # Data vendor configuration. Trade Brain core OHLCV prefers Kite when configured
-    # and returns explicitly-labelled Yahoo fallback otherwise. Fundamentals/news and
-    # technical-indicator helper tools remain on their appropriate non-Kite vendors.
+    # Data vendor configuration. Price + price-derived indicators route through Trade
+    # Brain: Kite when configured, explicitly-labelled Yahoo fallback otherwise.
+    # Fundamentals/news stay on providers that actually supply those data classes.
     "data_vendors": {
         "core_stock_apis": "tradebrain",
-        "technical_indicators": "yfinance",
+        "technical_indicators": "tradebrain",
         "fundamental_data": "yfinance",
         "news_data": "yfinance",
         "indian_market_data": "nse",
