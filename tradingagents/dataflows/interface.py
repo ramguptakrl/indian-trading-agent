@@ -1,6 +1,7 @@
 from typing import Annotated
 
 # Import from vendor-specific modules
+from .tradebrain_market import get_tradebrain_stock_data
 from .y_finance import (
     get_YFin_data_online,
     get_stock_stats_indicators_window,
@@ -76,6 +77,7 @@ TOOLS_CATEGORIES = {
 }
 
 VENDOR_LIST = [
+    "tradebrain",
     "yfinance",
     "alpha_vantage",
     "nse",
@@ -83,17 +85,20 @@ VENDOR_LIST = [
 
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
-    # core_stock_apis
+    # core_stock_apis: Trade Brain selects Kite when configured and explicitly
+    # labelled Yahoo fallback otherwise.
     "get_stock_data": {
+        "tradebrain": get_tradebrain_stock_data,
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
     },
-    # technical_indicators
+    # technical_indicators remain calculation/vendor tools; price truth used by the
+    # final Trade Brain gate/replay comes from the audited market store.
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
     },
-    # fundamental_data
+    # fundamental data is not supplied by Kite.
     "get_fundamentals": {
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
@@ -110,7 +115,7 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
     },
-    # news_data
+    # news data is not supplied by Kite.
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
@@ -183,6 +188,6 @@ def route_to_vendor(method: str, *args, **kwargs):
         try:
             return impl_func(*args, **kwargs)
         except AlphaVantageRateLimitError:
-            continue  # Only rate limits trigger fallback
+            continue  # Only Alpha Vantage rate limits trigger router fallback.
 
     raise RuntimeError(f"No available vendor for '{method}'")
