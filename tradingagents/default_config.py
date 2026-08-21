@@ -17,9 +17,11 @@ DEFAULT_CONFIG = {
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
     "max_recur_limit": 100,
-    # Data vendor configuration
+    # Data vendor configuration. Trade Brain core OHLCV prefers Kite when configured
+    # and returns explicitly-labelled Yahoo fallback otherwise. Fundamentals/news and
+    # technical-indicator helper tools remain on their appropriate non-Kite vendors.
     "data_vendors": {
-        "core_stock_apis": "yfinance",
+        "core_stock_apis": "tradebrain",
         "technical_indicators": "yfinance",
         "fundamental_data": "yfinance",
         "news_data": "yfinance",
@@ -65,10 +67,12 @@ DEFAULT_CONFIG = {
     # The configured credential may belong to an NRI account; that does NOT make the
     # modeled trader NRI and must not import NRI trading/cost/tax restrictions.
     "market_data_credential_role": "MARKET_DATA_ONLY",
-    "market_data_credential_account_type_affects_policy": False,
+    "market_data_primary_when_configured": "ZERODHA_KITE",
+    "market_data_fallback": "YAHOO_RESEARCH_FALLBACK",
     "kite_api_key": None,
     "kite_api_secret": None,
     "kite_access_token": None,
+    "kite_live_mode": "quote",
     "kite_order_api_enabled": False,
     # === Paper/accounting safety ===
     "paper_buying_power_mode": "CASH_NOTIONAL_CONSERVATIVE",
