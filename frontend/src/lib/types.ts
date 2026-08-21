@@ -124,6 +124,67 @@ export interface AnalysisHistoryItem {
   created_at: string;
 }
 
+export interface ActualTradeExit {
+  exit_id: string;
+  trade_id: string;
+  quantity: number;
+  exit_price: number;
+  exit_timestamp: string;
+  gross_pnl: number;
+  estimated_charges: number;
+  actual_charges_override?: number | null;
+  charges_used: number;
+  net_pnl: number;
+  broker_order_ref?: string | null;
+  notes?: string | null;
+}
+
+export interface ActualTrade {
+  trade_id: string;
+  advisory_task_id?: string | null;
+  ticker: string;
+  exchange: "NSE" | "BSE";
+  mode: "INTRADAY" | "SWING";
+  direction: "LONG" | "SHORT";
+  original_quantity: number;
+  open_quantity: number;
+  avg_entry_price: number;
+  entry_timestamp: string;
+  stop_loss?: number | null;
+  take_profit?: number | null;
+  broker_order_ref?: string | null;
+  status: "OPEN" | "PARTIALLY_CLOSED" | "CLOSED";
+  advisory_alignment: string;
+  entry_policy_violation: boolean;
+  violation_reasons: string[];
+  realized_gross_pnl: number;
+  estimated_or_actual_charges: number;
+  realized_net_pnl: number;
+  notes?: string | null;
+  observation_kind: "ACTUAL_MANUAL_TRADE";
+  manual_tracking_only: boolean;
+  order_execution_enabled: false;
+  exits?: ActualTradeExit[];
+}
+
+export interface ActualTradeMark {
+  trade_id: string;
+  status: string;
+  ticker?: string;
+  mode?: string;
+  direction?: string;
+  current_price: number;
+  source: string;
+  open_quantity: number;
+  unrealized_gross_pnl: number;
+  estimated_open_charges_if_closed_now?: number;
+  estimated_open_net_pnl_if_closed_now: number;
+  realized_net_pnl: number;
+  combined_realized_plus_estimated_open_net_pnl: number;
+  charges_estimated?: boolean;
+  order_execution_allowed: false;
+}
+
 export interface BacktestTrade {
   trade_date: string;
   ticker: string;
