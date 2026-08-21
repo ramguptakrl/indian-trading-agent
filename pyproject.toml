@@ -30,6 +30,7 @@ dependencies = [
     "stockstats>=0.6.5",
     "tqdm>=4.67.1",
     "typing-extensions>=4.14.0",
+    "websockets>=13.0",
     "yfinance>=0.2.63",
     "python-dotenv>=1.0.0",
 ]
