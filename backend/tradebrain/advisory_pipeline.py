@@ -106,7 +106,9 @@ def parse_agent_candidate(text: str) -> dict[str, Any]:
         errors.append("Missing or unsupported Candidate Verdict field")
 
     safe_no_trade = verdict in SAFE_VERDICTS if verdict else False
-    exit_only = verdict in EXIT_VERDICTS and direction is None
+    # Direction NONE is normalized to parsed["direction"] == None. Treat an explicit
+    # SELL/EXIT + no direction as reduction/exit context, never as a fresh short.
+    exit_only = verdict in EXIT_VERDICTS and parsed["direction"] is None
     if safe_no_trade or exit_only:
         parsed.update(
             {
