@@ -27,12 +27,6 @@ export default function ActualTradesPage() {
   const [openDialog, setOpenDialog] = useState(false);
   const [closing, setClosing] = useState<ActualTrade | null>(null);
 
-  const loadBase = useCallback(async () => {
-    const [tradeResp, statsResp]: any[] = await Promise.all([listActualTrades(), getActualTradeStats()]);
-    setTrades(tradeResp.trades || []);
-    setStats(statsResp);
-  }, []);
-
   const refreshMarks = useCallback(async (currentTrades?: ActualTrade[]) => {
     const sourceTrades = currentTrades || trades;
     const openTrades = sourceTrades.filter((t) => t.status !== "CLOSED" && t.open_quantity > 0);
