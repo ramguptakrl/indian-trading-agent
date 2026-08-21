@@ -21,6 +21,13 @@ on:
       - "tradingagents/graph/signal_processing.py"
       - "tradingagents/agents/trader/trader.py"
       - "tradingagents/agents/managers/portfolio_manager.py"
+      - "frontend/src/app/analysis/**"
+      - "frontend/src/app/history/**"
+      - "frontend/src/components/analysis/**"
+      - "frontend/src/lib/store.ts"
+      - "frontend/src/lib/types.ts"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
       - "tests/test_tradebrain_*.py"
       - "scripts/tradebrain_phase2_smoke.py"
       - "scripts/tradebrain_phase3_smoke.py"
@@ -29,6 +36,7 @@ on:
       - "scripts/tradebrain_phase6_smoke.py"
       - "scripts/tradebrain_phase10_smoke.py"
       - "pyproject.toml"
+      - ".env.example"
       - ".github/workflows/tradebrain-foundation.yml"
   push:
     branches:
@@ -52,6 +60,13 @@ on:
       - "tradingagents/graph/signal_processing.py"
       - "tradingagents/agents/trader/trader.py"
       - "tradingagents/agents/managers/portfolio_manager.py"
+      - "frontend/src/app/analysis/**"
+      - "frontend/src/app/history/**"
+      - "frontend/src/components/analysis/**"
+      - "frontend/src/lib/store.ts"
+      - "frontend/src/lib/types.ts"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
       - "tests/test_tradebrain_*.py"
       - "scripts/tradebrain_phase2_smoke.py"
       - "scripts/tradebrain_phase3_smoke.py"
@@ -60,6 +75,7 @@ on:
       - "scripts/tradebrain_phase6_smoke.py"
       - "scripts/tradebrain_phase10_smoke.py"
       - "pyproject.toml"
+      - ".env.example"
       - ".github/workflows/tradebrain-foundation.yml"
 
 jobs:
@@ -122,3 +138,19 @@ jobs:
       - name: Live Phase 10 calendar + BSE final advisory smoke (observational)
         continue-on-error: true
         run: python scripts/tradebrain_phase10_smoke.py
+
+  frontend-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build frontend Trade Brain contract
+        working-directory: frontend
+        run: npm run build
