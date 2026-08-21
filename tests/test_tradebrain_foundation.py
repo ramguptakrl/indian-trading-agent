@@ -6,6 +6,14 @@ from zoneinfo import ZoneInfo
 
 from backend.tradebrain.identity import ExchangeListing, can_merge_listings
 from backend.tradebrain.policy import TradePlan, evaluate_trade_plan
+from backend.tradebrain.security_master import parse_bse_equity_master, parse_nse_equity_master
+from backend.tradebrain.security_store import (
+    bulk_upsert_listings,
+    ensure_security_master_schema,
+    get_exchange_listing,
+    get_identity_by_isin,
+    security_master_stats,
+)
 from backend.tradebrain.soft_evidence import annotate_recommendation_payload, annotate_daily_verdict
 from backend.tradebrain.store import (
     ensure_tradebrain_schema,
@@ -209,6 +217,104 @@ class TradeBrainStoreTests(unittest.TestCase):
         stats = store_stats(self.db_path)
         self.assertEqual(stats["tb_trade_plan_evaluations"], 1)
         self.assertEqual(stats["tb_trade_plan_outcomes"], 1)
+
+
+class TradeBrainSecurityMasterTests(unittest.TestCase):
+    NSE_SAMPLE = b"""SYMBOL,NAME OF COMPANY,SERIES,DATE OF LISTING,PAID UP VALUE,MARKET LOT,ISIN NUMBER,FACE VALUE,INDUSTRY\nRELIANCE,Reliance Industries Limited,EQ,29-Nov-1995,10,1,INE002A01018,10,Oil Gas & Consumable Fuels\nBADROW,Bad Identity Limited,EQ,01-Jan-2020,10,1,NA,10,Other\n"""
+
+    BSE_SAMPLE = b'''[
+      {"SCRIP_CD":"500325","scrip_id":"RELIANCE","ISIN_NUMBER":"INE002A01018","Scrip_Name":"Reliance Industries Ltd","GROUP":"A","INDUSTRY":"Integrated Oil & Gas"},
+      {"SCRIP_CD":"531562","scrip_id":"BAD","ISIN_NUMBER":"NA","Scrip_Name":"Bad Identity","GROUP":"X"}
+    ]'''
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.tmp.name, "security-master-test.db")
+        ensure_security_master_schema(self.db_path)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_nse_parser_rejects_missing_isin(self):
+        rows, rejected = parse_nse_equity_master(self.NSE_SAMPLE)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rows[0]["listing"].symbol, "RELIANCE")
+        self.assertEqual(rows[0]["listing"].isin, "INE002A01018")
+
+    def test_bse_parser_uses_scrip_code_as_stable_listing_symbol(self):
+        rows, rejected = parse_bse_equity_master(self.BSE_SAMPLE)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rows[0]["listing"].symbol, "500325")
+        self.assertEqual(rows[0]["exchange_security_id"], "RELIANCE")
+        self.assertEqual(rows[0]["group_name"], "A")
+
+    def test_cross_exchange_bulk_upsert_is_idempotent(self):
+        nse_rows, _ = parse_nse_equity_master(self.NSE_SAMPLE)
+        bse_rows, _ = parse_bse_equity_master(self.BSE_SAMPLE)
+
+        nse_first = bulk_upsert_listings(
+            nse_rows,
+            source_key="NSE_EQUITY_SECURITY_MASTER",
+            source_timestamp="2026-08-21T18:00:00+00:00",
+            db_path=self.db_path,
+        )
+        bse_first = bulk_upsert_listings(
+            bse_rows,
+            source_key="BSE_EQUITY_SECURITY_MASTER",
+            source_timestamp="2026-08-21T18:01:00+00:00",
+            db_path=self.db_path,
+        )
+        nse_second = bulk_upsert_listings(
+            nse_rows,
+            source_key="NSE_EQUITY_SECURITY_MASTER",
+            source_timestamp="2026-08-21T18:02:00+00:00",
+            db_path=self.db_path,
+        )
+
+        self.assertEqual(nse_first["rows_inserted"], 1)
+        self.assertEqual(nse_first["canonical_created"], 1)
+        self.assertEqual(bse_first["rows_inserted"], 1)
+        self.assertEqual(bse_first["canonical_created"], 0)
+        self.assertEqual(nse_second["rows_inserted"], 0)
+        self.assertEqual(nse_second["rows_updated"], 1)
+        self.assertEqual(nse_second["canonical_created"], 0)
+
+        stats = security_master_stats(self.db_path)
+        self.assertEqual(stats["canonical_securities"], 1)
+        self.assertEqual(stats["mapped_exchange_listings"], 2)
+        self.assertEqual(stats["nse_bse_isin_matches"], 1)
+
+        identity = get_identity_by_isin("INE002A01018", self.db_path)
+        self.assertIsNotNone(identity)
+        self.assertEqual(len(identity["listings"]), 2)
+        bse = get_exchange_listing("BSE", "500325", self.db_path)
+        self.assertEqual(bse["exchange_security_id"], "RELIANCE")
+
+    def test_missing_from_new_payload_does_not_mark_old_listing_delisted(self):
+        rows, _ = parse_nse_equity_master(self.NSE_SAMPLE)
+        extra = {
+            **rows[0],
+            "listing": ExchangeListing(exchange="NSE", symbol="SECOND", isin="INE000A01001"),
+            "listing_name": "Second Company",
+            "security_name": "Second Company",
+        }
+        bulk_upsert_listings(
+            [rows[0], extra],
+            source_key="NSE_EQUITY_SECURITY_MASTER",
+            source_timestamp="2026-08-21T18:00:00+00:00",
+            db_path=self.db_path,
+        )
+        bulk_upsert_listings(
+            [rows[0]],
+            source_key="NSE_EQUITY_SECURITY_MASTER",
+            source_timestamp="2026-08-22T18:00:00+00:00",
+            db_path=self.db_path,
+        )
+        second = get_exchange_listing("NSE", "SECOND", self.db_path)
+        self.assertIsNotNone(second)
+        self.assertEqual(second["listing_status"], "ACTIVE")
 
 
 if __name__ == "__main__":
