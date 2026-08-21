@@ -44,6 +44,8 @@ from backend.tradebrain.exchange_calendar import ensure_exchange_calendar_schema
 from backend.tradebrain.advisory_store import ensure_advisory_schema
 from backend.tradebrain.evidence_baseline import ensure_evidence_schema
 from backend.tradebrain.prospective_gap import ensure_prospective_gap_schema
+from backend.tradebrain.kite_stream import ensure_kite_live_schema
+from backend.tradebrain.market_source_policy import market_source_status
 
 
 @asynccontextmanager
@@ -60,6 +62,7 @@ async def lifespan(app: FastAPI):
     ensure_advisory_schema()
     ensure_evidence_schema()
     ensure_prospective_gap_schema()
+    ensure_kite_live_schema()
     install_phase4_regime_hardening()
     load_api_keys_into_env()
     apply_llm_config_to_default()
@@ -69,7 +72,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Indian Market Trading Agent — Trade Brain Reframe",
     description="Resident-Indian INTRADAY/SWING research with audited evidence, deterministic gating and execution disabled",
-    version="0.11.1",
+    version="0.12.0",
     lifespan=lifespan,
 )
 
@@ -121,7 +124,7 @@ def health():
         "status": "ok",
         "service": "indian-trading-agent",
         "tradebrain_reframe": True,
-        "tradebrain_version": "0.11.1",
+        "tradebrain_version": "0.12.0",
         "trader_profile": "RESIDENT_INDIAN",
         "active_trade_modes": ["INTRADAY", "SWING"],
         "mtf_enabled": False,
@@ -134,6 +137,9 @@ def health():
         "approved_soft_runtime": True,
         "verified_exchange_calendar_capability": True,
         "kite_market_data_only_adapter": True,
+        "kite_websocket_live_plane": True,
+        "kite_long_history_chunking": True,
+        "market_source_preference": market_source_status(),
         "resident_equity_cost_engine": True,
         "net_cost_paper_ledger": True,
         "final_advisory_pipeline": True,
