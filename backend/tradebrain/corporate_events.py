@@ -308,7 +308,14 @@ def _extract_bse_rows(payload: bytes) -> tuple[list[dict[str, Any]], int | None]
         raise ValueError(f"Malformed BSE announcement JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError("BSE announcement payload is not a JSON object")
-    rows = data.get("Table") or []
+    if "Table" not in data:
+        raise ValueError(
+            "BSE announcement payload is missing the expected Table field; "
+            "do not treat an unverified empty/block response as a valid empty feed"
+        )
+    rows = data["Table"]
+    if rows is None:
+        rows = []
     if not isinstance(rows, list):
         raise ValueError("BSE announcement payload Table is not a list")
     total = None
