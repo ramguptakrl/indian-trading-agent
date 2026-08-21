@@ -1,11 +1,11 @@
-"""Trade Brain compatibility layer for the Indian Trading Agent.
+"""Trade Brain compatibility/control layer for the Indian Trading Agent.
 
-This package adds deterministic policy, provenance, ISIN-first identity, official
-security-master collection, corporate-event/document memory, audited market-data
-persistence, look-ahead-safe replay, strict outcome reconstruction, Focus Instrument
-Lab analytics, frozen challenger/walk-forward validation, resident INTRADAY/SWING
-net-cost economics and paper accounting without replacing the upstream multi-agent
-research stack.
+Adds deterministic policy, provenance, ISIN-first identity, official event/document
+memory, audited market data, look-ahead-safe replay, strict outcomes, Focus Lab,
+frozen challenger validation, human-approved soft runtime, resident INTRADAY/SWING
+net-cost paper accounting, verified exchange-calendar memory, a Kite market-data-only
+adapter, and a fail-closed final advisory boundary without replacing the upstream
+multi-agent research stack or enabling order execution.
 """
 
-TRADEBRAIN_VERSION = "0.7.0"
+TRADEBRAIN_VERSION = "0.11.0"
