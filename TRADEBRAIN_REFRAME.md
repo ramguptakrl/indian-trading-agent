@@ -1,444 +1,286 @@
 # Trade Brain Reframe for `indian-trading-agent`
 
-Status: foundation + Phase 1 security-master implementation
+Status: **Phases 0-6 implemented on the Trade Brain reframe branch**  
+Current Trade Brain version: **0.7.0**
 
-This file is the canonical architectural bridge between the existing Indian Trading Agent repository and the prior Trade Brain / BSE Engine work. It intentionally removes historical troubleshooting logs, retired L1/L2/L3 rescue-cycle details, local Windows paths, screenshots, and milestone-by-milestone chat continuity text. Those were useful during development but should not become product architecture.
+This is the canonical product architecture. Historical chat/checkpoint details are not product doctrine.
 
-## 1. Final product direction
+## 1. Product identity
 
-The repository remains the application foundation. We do **not** replace its multi-agent pipeline, web UI, scanners, backtests, paper trading, calibration, market regime work, signal performance tracking, or memory system.
+Trade Brain is a **resident-Indian equity research and paper-accounting system** built on top of the existing Indian Trading Agent repository.
 
-Trade Brain adds the missing control plane:
+The repository's LangGraph research pipeline, FastAPI/Next.js shell, scanners, market-regime work, simulation, calibration, memory and UI remain useful. Trade Brain adds identity, provenance, official-event memory, audited replay, deterministic safety, outcome learning, walk-forward governance and net-cost paper accounting.
 
-```text
-OFFICIAL / REFERENCE DATA       MARKET DATA
-NSE/BSE/SEBI/RBI/etc.           price/volume/timeframes
-        |                              |
-        +--------------+---------------+
-                       |
-          IDENTITY + PROVENANCE + MEMORY
-                       |
-          REPO RESEARCH / MULTI-AGENT LAYER
-     scanner / news / fundamentals / debate / regime
-                       |
-          HISTORY + OUTCOME / REPLAY EVIDENCE
-                       |
-            MARKET STRUCTURE + RISK
-                       |
-                 CRASH GUARD
-                       |
-          DETERMINISTIC HARD-RULE ARBITER
-                       |
-             STRUCTURED TRADE PLAN
-              DAY | SWING_POSITION
-                       |
-              ADVISORY GUIDANCE
-```
+LLMs are evidence synthesis/reasoning tools. They are not the source of truth for prices, identity, exchange/broker rules, charges or trade permission.
 
-LLMs are reasoning and orchestration tools. They are not the source of truth for market data, security identity, broker rules, or hard risk constraints.
+## 2. Only two active trade modes
 
-## 2. What we keep from this repository
+### INTRADAY
 
-These are stronger or more mature than the corresponding old prototypes and should be reused rather than rebuilt:
-
-- LangGraph multi-agent analyst / bull-bear / risk debate pipeline.
-- FastAPI + Next.js application shell.
-- scanner and unified recommender as **discovery tools**.
-- support/resistance, pivots, cyclical tools, charts and news UI.
-- paper trading and historical simulation.
-- signal-performance feedback and conditional regime weights.
-- confidence calibration / Brier-score concepts.
-- market-regime classification.
-- shadow trades / counterfactual tracking.
-- memory persistence, pruning and decay.
-- provider abstraction for multiple LLMs.
-- existing `order_execution_enabled=False` safety stance.
-
-The goal is to improve the meaning and governance of these outputs, not throw them away.
-
-## 3. What Trade Brain changes
-
-### 3.1 Heuristic score is not learned probability
-
-The repository currently derives a `success_probability` from score magnitude and aligned-signal count. That number is useful for ranking but it is not automatically a learned probability for the current stock, setup family, regime, direction, timeframe, and exit geometry.
-
-Compatibility rule:
-
-- keep legacy response fields so the existing frontend does not break;
-- label them `HEURISTIC_NOT_LEARNED`;
-- treat them as soft evidence;
-- graduate to a learned/calibrated probability only after plan-specific historical outcomes and out-of-sample validation exist.
-
-### 3.2 Daily Verdict is context, not permission
-
-GREEN / YELLOW / RED may summarize broad market conditions. It cannot authorize a trade.
-
-A final plan still needs explicit entry / stop / target and must pass deterministic hard rules.
-
-### 3.3 Security identity becomes ISIN-first
-
-Never assume that a ticker or similar company name is a stable security identity.
-
-Target model:
-
-```text
-Issuer / Company Entity
-    -> Canonical Security (ISIN)
-        -> NSE Listing
-        -> BSE Listing
-```
-
-Automatic cross-exchange merge requires the same valid ISIN. Missing ISIN means "unresolved", not "safe to fuzzy merge". Missing from the latest exchange list does not prove delisting.
-
-### 3.4 Provenance becomes first-class
-
-Official/reference collectors should preserve where practical:
-
-- source name;
-- source URL;
-- fetch timestamp;
-- raw payload/archive path;
-- SHA-256;
-- normalization/parser version.
-
-Raw payload is archived before normalization in the Phase 1 security-master collectors so an import can be reproduced or replayed.
-
-### 3.5 Hard rules sit above AI
-
-Current immutable/user-controlled policy:
-
-- advisory-only; no automatic order execution;
-- DAY plan needs explicit entry, TP and SL;
-- DAY: no new entry from 15:10 IST;
-- DAY must be flat before 15:15 IST;
-- SWING/POSITION is LONG-only in the current equity/MTF architecture;
-- verified broker/exchange restrictions outrank model output;
-- Severe Crash Guard blocks fresh LONG exposure;
-- a crash signal does not automatically create a SHORT;
-- AI/backtesting may propose changes to soft parameters but may not silently rewrite hard rules.
-
-### 3.6 Soft information is allowed to learn
-
-Examples:
-
-- support/resistance reliability;
-- ATH behaviour;
-- timeframe usefulness;
-- regime importance;
-- volume significance;
-- Crash Guard threshold candidates;
-- relative-market correlations;
-- false-break probability;
-- time-to-target;
-- DAY reward/risk threshold;
-- SWING target geometry;
-- historical analogue feature weights.
-
-Promotion flow:
-
-1. Keep current model A.
-2. Create challenger B.
-3. Replay/backtest both without look-ahead.
-4. Validate walk-forward / out-of-sample.
-5. Report improvement and risk trade-offs.
-6. Promote deliberately.
-7. Never silently change a hard rule.
-
-## 4. Two operating profiles
-
-### INDIAN_MARKET_MASTER
-
-Broad market intelligence across Indian equities:
-
-- discover stocks;
-- company/fundamental/news research;
-- NSE/BSE/SEBI/RBI context;
-- sector and macro context;
-- events and filings;
-- strategy exploration;
-- market regime and breadth;
-- portfolio/risk intelligence later.
-
-This profile can use the repository's broad stock universes and scanners.
-
-### FOCUS_INSTRUMENT_LAB
-
-Deep learning for one chosen instrument, initially compatible with the BSE Ltd use case:
-
-- richer historical storage;
-- multi-timeframe reconstruction;
-- corporate-action-aware comparable-price eras;
-- adaptive ATH/support/resistance;
-- historical analogues;
-- plan-specific outcomes;
-- Crash Guard calibration;
-- level reliability;
-- relative-market context;
-- broker-cost economics.
-
-Broad-market signal weights must not be assumed to transfer to the focus instrument. The instrument's own history decides.
-
-## 5. Trade modes
-
-### DAY
-
+- Resident cash-equity intraday.
 - LONG or SHORT.
-- same-session only.
-- explicit entry / TP / SL required.
-- 15:10 IST onward: no fresh DAY entry.
-- before 15:15 IST: must be flat.
-- current 1:1 reward/risk is a **provisional starting floor**, not a learned optimum.
-- multi-timeframe information can contribute, but no rigid "D1 must do X / M5 must do Y" dogma.
+- Same cash-market session only.
+- Explicit Entry / Stop-Loss / Take-Profit required.
+- No fresh entry from **15:10 IST**.
+- Must be flat before **15:15 IST**.
+- Provisional R:R starting floor is ~1:1 and remains a soft, challengeable parameter.
 
-### SWING_POSITION
+### SWING
 
-- overnight / multi-day LONG equity.
-- MTF may later be used as a funding mechanism.
-- the retired L1/L2/L3 averaging/rescue cycle is **not** revived.
-- current ~1:3 reward/risk is a starting preference, not immutable truth.
-- true net target must eventually include financing, brokerage, taxes, duties, DP/pledge costs, slippage and days held.
+- Resident multi-day cash/delivery equity.
+- LONG only in the active architecture.
+- Funded with the trader's **own cash**.
+- Explicit Entry / Stop-Loss / Take-Profit required.
+- Provisional R:R starting preference is ~1:3 and remains a soft, challengeable parameter.
 
-## 6. Market vs after-market brain schedule
+There is **no MTF mode**, no funded-amount model, no pledge-financing logic and no financing-interest engine. Derivatives and overnight shorting are outside the active product.
 
-The product should have an explicit operating state rather than one undifferentiated loop.
+Historical Phases 0-5 rows used `DAY` and `SWING_POSITION`. Those values remain internal compatibility aliases only:
 
-Typical states:
+```text
+DAY             -> INTRADAY
+SWING_POSITION  -> SWING
+```
 
-- `PRE_MARKET_RESEARCH`
-- `LIVE_MARKET_RESEARCH`
-- `LIVE_MARKET_RISK_ONLY` during the DAY exit window / hard exit period
-- `POST_MARKET_STUDY`
-- `STUDY_REPLAY` on non-market days
+New user-facing Phase-6 APIs and paper-ledger records use only `INTRADAY` and `SWING`.
 
-The current foundation uses weekday/clock logic only. A verified NSE/BSE trading calendar must later override holidays and special sessions.
+## 3. Trader identity is separate from data-credential identity
 
-## 7. Source-of-truth hierarchy
+The modeled trader is:
+
+```text
+RESIDENT_INDIAN
+```
+
+A Zerodha/Kite credential may later be configured to provide:
+
+- live quotes;
+- WebSocket ticks;
+- historical candles;
+- backtest/replay inputs.
+
+That credential may belong to an NRI account. **This does not make the modeled trader NRI.**
+
+A data-only credential must never import into policy/economics:
+
+- NRI trading restrictions;
+- NRI brokerage rates;
+- NRI TDS/tax treatment;
+- PIS/Non-PIS rules;
+- NRI order permissions.
+
+The active boundary is:
+
+```text
+KITE / BROKER CREDENTIAL
+        |
+        +--> MARKET DATA ONLY
+             live / historical / backtest
+
+RESIDENT TRADER PROFILE
+        |
+        +--> INTRADAY / SWING policy
+        +--> resident equity cost profile
+        +--> paper accounting
+
+ORDER API = OFF
+```
+
+## 4. Architecture
+
+```text
+OFFICIAL / REFERENCE DATA          MARKET DATA
+NSE / BSE / regulators             audited vendor / future Kite data-only adapter
+          |                                  |
+          +----------------+-----------------+
+                           |
+             IDENTITY + PROVENANCE + MEMORY
+                           |
+              MULTI-AGENT RESEARCH LAYER
+                           |
+                 AUDITED HISTORY / REPLAY
+                           |
+                  STRICT OUTCOME ENGINE
+                           |
+                FOCUS INSTRUMENT LAB
+                           |
+          FROZEN CHALLENGER / WALK-FORWARD
+                           |
+            MARKET STRUCTURE + CRASH GUARD
+                           |
+             DETERMINISTIC HARD-RULE GATE
+                           |
+              RESIDENT EQUITY COST ENGINE
+                           |
+           STRUCTURED INTRADAY / SWING PLAN
+                           |
+              NET-COST PAPER ACCOUNTING
+                           |
+                   ADVISORY GUIDANCE
+```
+
+Automatic order execution remains OFF.
+
+## 5. Source-of-truth rules
 
 ### Security identity
 
-Official exchange/security-master data + ISIN mapping. Phase 1 now ingests official NSE/BSE equity masters into a persistent local identity model.
+Official exchange security masters with ISIN-first mapping.
 
-### Corporate events / regulation
+```text
+Issuer -> Canonical Security (ISIN) -> NSE/BSE Listing
+```
 
-Prefer official NSE/BSE/SEBI/RBI/company exchange filings. News/social sources may provide leads but not silently replace official facts.
+No fuzzy cross-exchange merge.
+
+### Corporate events
+
+Prefer official NSE/BSE/regulator/company exchange filings. News/social sources may provide leads but cannot silently replace official facts.
 
 ### Market prices
 
-A configured market-data provider with timestamps and quality checks. yfinance is useful for low-friction research and prototyping, but long-term Trade Brain history should have explicit auditability and provider metadata.
+Every persisted source must retain source/provider, timestamps and quality metadata. Yahoo/yfinance is currently a NON-OFFICIAL first adapter. A future Kite adapter can be added as data transport without changing trader identity.
 
-### Broker rules / costs
+### Broker costs
 
-Verified broker documentation/API behaviour. Do not let an LLM invent margin, cost, product or execution rules.
+Use versioned, verified **resident individual** equity charge profiles. Never derive costs from the account type of a data-only credential.
 
 ### AI
 
-Interpretation, synthesis, research planning, hypothesis generation, debate and explanation.
+Interpretation, hypothesis generation, synthesis, debate and explanation only.
 
-## 8. Implemented in this branch
+## 6. Hard rules above AI
 
-- `backend/tradebrain/policy.py`
-  - deterministic hard-rule arbiter;
-  - DAY 15:10 / 15:15 rules;
-  - mandatory TP/SL geometry;
-  - SWING short block;
-  - Severe Crash Guard LONG block;
-  - broker-rule block;
-  - advisory-only output;
-  - provisional R:R warnings.
+Current hard/user-controlled boundaries include:
 
-- `backend/tradebrain/schedule.py`
-  - pre-market / live / exit-window / post-market / study modes.
+- advisory only;
+- order execution OFF;
+- only INTRADAY and SWING active;
+- explicit Entry / SL / TP required;
+- INTRADAY no new entry from 15:10 IST;
+- INTRADAY flat before 15:15 IST;
+- SWING LONG cash/delivery only;
+- MTF disabled;
+- verified broker/exchange restrictions outrank model opinion;
+- Severe Crash Guard blocks fresh LONG exposure;
+- a crash signal does not automatically create a SHORT.
 
-- `backend/tradebrain/identity.py`
-  - ISIN normalization;
-  - no automatic cross-exchange merge without matching valid ISIN.
+Phase-5 learning may challenge soft parameters but cannot silently rewrite these hard boundaries.
 
-- `backend/tradebrain/provenance.py`
-  - SHA-256 helpers and standard provenance record.
+## 7. Soft information may learn
 
-- `backend/tradebrain/store.py`
-  - namespaced `tb_*` issuer/security/listing/source/raw-artifact/plan tables;
-  - persistent plan evaluations and outcomes.
+Examples:
 
-- `backend/tradebrain/security_store.py`
-  - non-destructive metadata columns for official security masters;
-  - one-transaction bulk upsert;
-  - idempotency counters;
-  - cross-exchange ISIN-match statistics;
-  - exact listing and ISIN lookups;
-  - missing-from-refresh does not imply delisted.
-
-- `backend/tradebrain/security_master.py`
-  - official NSE `EQUITY_L.csv` collector;
-  - official BSE active-equity scrip-list collector;
-  - browser-like transport/referer handling;
-  - raw payload archive before parsing;
-  - SHA-256 + parser-version provenance;
-  - tolerant NSE CSV and BSE JSON parsing;
-  - explicit invalid/missing-ISIN rejection sample;
-  - safe ISIN-only cross-exchange identity.
-
-- `backend/tradebrain/soft_evidence.py`
-  - compatibility annotation for legacy score-derived probabilities;
-  - Daily Verdict marked as soft context only.
-
-- `backend/routers/tradebrain.py`
-  - doctrine and operating-mode APIs;
-  - deterministic plan validation/outcome APIs;
-  - exact identity APIs;
-  - NSE/BSE/all security-master refresh APIs;
-  - security-master statistics API;
-  - roadmap API.
-
-- existing recommender and Daily Verdict endpoints remain backwards compatible but expose Trade Brain warnings/metadata.
-
-### Phase 1 endpoints
-
-```text
-POST /api/tradebrain/security-master/nse
-POST /api/tradebrain/security-master/bse
-POST /api/tradebrain/security-master/refresh
-GET  /api/tradebrain/security-master/stats
-GET  /api/tradebrain/identity/isin/{isin}
-GET  /api/tradebrain/identity/listing/{exchange}/{symbol}
-```
-
-The collector output reports received/valid/rejected rows, inserted/updated listings, newly created canonical securities, provenance/artifact identity and a rejected-row sample. Repeating the same master updates existing listings instead of duplicating them.
-
-## 9. Implementation sequence
-
-### Phase A — official security master + persisted identity
-
-**STATUS: IMPLEMENTED IN CODE; LIVE EXCHANGE TRANSPORT STILL REQUIRES RUNTIME VALIDATION.**
-
-Implemented:
-
-- issuer entities created deterministically per verified ISIN;
-- canonical securities by ISIN;
-- NSE listings keyed by NSE symbol;
-- BSE listings keyed by stable six-digit scrip code with BSE `scrip_id` preserved separately;
-- NSE series/industry metadata and BSE group/industry metadata where supplied;
-- raw source archive + SHA-256 + parser version;
-- idempotent bulk upsert;
-- explicit rejected-row sample for missing/invalid identity;
-- exact ISIN/listing lookup APIs;
-- cross-exchange match counts;
-- safe rule that source absence does not prove delisting.
-
-Not silently added:
-
-- fuzzy issuer merging;
-- automatic alias merging by similar company name;
-- inferred delisting/suspension from absence;
-- live broker identity substitution.
-
-Verified CIN/LEI/company relationships and richer aliases/classifications can be added later without weakening the ISIN rule.
-
-### Phase B — corporate events and document memory
-
-- NSE/BSE announcements/filings;
-- raw feed archive;
-- exact event identity/upsert;
-- event -> security/entity resolution;
-- attachment download;
-- SHA-256 / duplicate detection;
-- local document text extraction;
-- event importance and "what changed?" queue.
-
-### Phase C — audited market-data history
-
-- OHLCV persistence;
-- provider/source/timestamp metadata;
-- incremental sync;
-- gap/duplicate checks;
-- session-boundary checks;
-- corporate-action-aware adjustment/comparable eras;
-- derived 5m/15m/30m/1h/2h/4h/1d/1w data;
-- look-ahead-safe replay API.
-
-### Phase D — plan-specific outcome engine
-
-Every structured setup should record:
-
-- entry timestamp/price;
-- mode and direction;
-- TP / SL;
-- context features at decision time;
-- TP-first / SL-first / neither;
-- MAE / MFE;
-- time-to-event;
-- R multiple;
-- regime;
-- source/evidence references.
-
-This replaces vague "the signal won" learning with plan-specific evidence.
-
-### Phase E — BSE Focus Instrument Lab
-
-- adaptive structural levels;
-- comparable ATH;
-- Crash Guard replay;
+- INTRADAY minimum R:R;
+- SWING minimum R:R;
 - level reliability;
-- multi-timeframe usefulness;
-- historical analogue validation;
-- normal-day false-positive testing;
-- relative BSE-vs-market behaviour.
+- timeframe usefulness;
+- regime importance;
+- volume significance;
+- event-category relevance;
+- false-break behaviour;
+- time-to-target;
+- historical analogue weights.
 
-### Phase F — cost and funding economics
+Promotion flow:
 
-- own contribution;
-- funded amount;
-- days held;
-- broker interest;
-- brokerage/taxes/fees;
-- true break-even;
-- true net target.
+1. Keep incumbent A.
+2. Define challenger B.
+3. Freeze hypothesis + TRAIN / VALIDATION / WALK_FORWARD windows.
+4. Replay without look-ahead.
+5. Enforce sample/ambiguity/coverage gates.
+6. Evaluate untouched out-of-sample results.
+7. Reach READY_FOR_REVIEW / NEEDS_MORE_DATA / REJECTED.
+8. Require explicit human approval for soft promotion.
+9. Never silently rewrite hard policy.
 
-Keep charges in a broker adapter/configuration layer and verify them rather than hardcoding assumptions forever.
+## 8. Implemented phases
 
-### Phase G — controlled learning
+### Phase 0 — deterministic advisory boundary
 
-- base/challenger model registry;
-- versioned features and weights;
-- walk-forward evaluation;
-- calibration metrics;
-- promotion audit trail;
-- rollback.
+- Entry/SL/TP geometry.
+- 15:10/15:15 intraday clock rules.
+- Crash Guard and broker restriction gates.
+- Advisory-only/no-order boundary.
 
-### Phase H — broker boundary
+### Phase 1 — official security identity
 
-- broker adapter interface;
-- read-only account/market integration first;
-- paper execution;
-- rule validation;
-- only then reconsider whether live execution is a desired product feature.
+- Official NSE/BSE equity masters.
+- Raw archive + SHA-256/parser provenance.
+- ISIN-first canonical identity.
+- Repeat-safe exact listing lookups.
 
-Until explicitly changed, automatic execution stays OFF.
+### Phase 2 — corporate event/document memory
 
-## 10. What not to port from the old checkpoints
+- NSE official corporate-announcement RSS.
+- BSE announcement parser with fail-safe schema rejection.
+- Exact event/security resolution.
+- Filing download/dedup/text extraction.
+- Persistent `what changed?` review queue.
 
-Do not carry forward as active product design:
+### Phase 3 — audited historical market data + replay
 
-- retired Probe/L1/L2/L3 rescue averaging;
-- old cycle kill/recovery machinery;
-- fixed +₹45 target as a current trading rule;
-- one giant desktop `app.py` architecture;
-- local machine paths and backup hashes as application doctrine;
-- provisional thresholds described as learned truths;
-- troubleshooting history that does not affect current architecture.
+- Identity-bound raw/unadjusted OHLCV.
+- Source/fetch audit records.
+- Validation/gap checks.
+- Corporate-action comparability eras.
+- 09:15-anchored derived timeframes.
+- Strict completed-candle `as_of` replay.
 
-Historical data can remain archived for audit, but it must not silently control the new model.
+### Phase 4 — strict outcomes + Focus Instrument Lab
 
-## 11. Definition of a trustworthy final result
+- TP_FIRST / SL_FIRST / NEITHER / NOT_ENTERED / AMBIGUOUS / INSUFFICIENT_DATA.
+- No intrabar order guessing.
+- MAE/MFE/R/time-to-event.
+- Regime/cohort/Crash Guard/level/event studies.
 
-A final Trade Brain result should clearly separate:
+### Phase 5 — frozen challenger / walk-forward validation
 
-1. **facts/evidence** — with source and time;
-2. **heuristic/learned estimates** — labelled with validation status;
-3. **AI interpretation** — narrative/reasoning, never source of truth;
-4. **hard-rule status** — deterministic PASS / WAIT / BLOCK / HARD_EXIT;
-5. **trade geometry** — entry / TP / SL / R:R;
-6. **cost status** — gross vs net economics explicitly stated;
-7. **execution boundary** — advisory only unless a later product decision changes it.
+- Frozen, SHA-256 fingerprinted experiment definitions.
+- TRAIN diagnostic only.
+- VALIDATION/WALK_FORWARD promotion gates.
+- Future-result censoring.
+- Human-only soft promotion registry.
+- Regime recent-window hardening.
 
-That separation is the main architectural principle of this reframe.
+### Phase 6 — resident equity economics + paper ledger
+
+- Active modes renamed to INTRADAY / SWING.
+- Legacy DAY / SWING_POSITION preserved only for historical replay compatibility.
+- Trader profile fixed to RESIDENT_INDIAN.
+- Broker/Kite credential role separated as MARKET_DATA_ONLY.
+- MTF/funded amount/financing disabled.
+- Versioned resident equity cost engine.
+- Brokerage, STT, exchange transaction charges, SEBI fee, IPFT, GST, stamp duty and SWING DP charges.
+- Configurable adverse slippage.
+- True net P&L and after-cost break-even/target solver.
+- Trade Brain paper accounts and paper positions.
+- Conservative full-notional virtual buying power; no hidden leverage assumption.
+- INTRADAY same-session/15:15 violation tracking.
+- SWING LONG own-cash accounting.
+- Order execution remains OFF.
+
+## 9. Two research profiles
+
+### INDIAN_MARKET_MASTER
+
+Broad Indian-equity intelligence for discovery, macro/sector/news/event context and research candidate generation.
+
+### FOCUS_INSTRUMENT_LAB
+
+Deep instrument-specific replay and learning, initially compatible with the BSE Ltd focus use case. Broad-market weights are not assumed to transfer; the instrument's own audited history must earn them.
+
+## 10. Definition of a trustworthy final result
+
+A Trade Brain result should separate:
+
+1. **facts/evidence** with source/time;
+2. **heuristic or learned estimates** with validation status;
+3. **AI interpretation** as interpretation only;
+4. **hard-rule status** as deterministic PASS / WAIT / BLOCK / HARD_EXIT;
+5. **trade geometry** Entry / TP / SL / R:R;
+6. **cost economics** gross vs resident net-after-cost;
+7. **trade mode** INTRADAY or SWING only;
+8. **execution boundary** advisory/paper only unless a future explicit product decision changes it.
+
+That separation is the core product doctrine.
