@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { runAnalysis, connectAnalysisWS } from "@/lib/api";
-import type { WSEvent } from "@/lib/types";
+import type { TradeBrainAdvisory } from "@/lib/types";
 
 interface AnalysisOptions {
   analysts?: string[];
@@ -31,6 +31,7 @@ interface AnalysisState {
   debates: { bull: string; bear: string };
   riskDebates: { aggressive: string; conservative: string; neutral: string };
   signal: string | null;
+  tradebrainAdvisory: TradeBrainAdvisory | null;
   error: string | null;
   duration: number | null;
   ws: WebSocket | null;
@@ -51,6 +52,7 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   debates: { bull: "", bear: "" },
   riskDebates: { aggressive: "", conservative: "", neutral: "" },
   signal: null,
+  tradebrainAdvisory: null,
   error: null,
   duration: null,
   ws: null,
@@ -59,7 +61,6 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   stats: null,
 
   start: async (ticker: string, tradeDate: string, options: AnalysisOptions = {}) => {
-    // Close existing WS if any
     const existingWs = get().ws;
     if (existingWs) {
       try { existingWs.close(); } catch {}
@@ -74,6 +75,7 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
       debates: { bull: "", bear: "" },
       riskDebates: { aggressive: "", conservative: "", neutral: "" },
       signal: null,
+      tradebrainAdvisory: null,
       error: null,
       duration: null,
       ws: null,
@@ -109,7 +111,11 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
             set({ riskDebates: { ...state.riskDebates, [event.side!]: event.content! }, lastUpdateAt: Date.now() });
             break;
           case "signal":
-            set({ signal: event.decision!, lastUpdateAt: Date.now() });
+            set({
+              signal: event.research_label || event.decision || "NO_TRADE",
+              tradebrainAdvisory: event.tradebrain_advisory || null,
+              lastUpdateAt: Date.now(),
+            });
             break;
           case "stats":
             set({
@@ -174,6 +180,7 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
       debates: { bull: "", bear: "" },
       riskDebates: { aggressive: "", conservative: "", neutral: "" },
       signal: null,
+      tradebrainAdvisory: null,
       error: null,
       duration: null,
       ws: null,
