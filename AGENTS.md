@@ -1,14 +1,30 @@
 # Trade Brain — Repository Guardrails
 
+## PROJECT ISOLATION — READ FIRST
+
+This repository is **Indian Trading Agent Trial / Trade Brain / BSE Engine**.
+
+It is a completely separate project from **Kronos-BSE**.
+
+- Never import, infer, copy, merge, or reuse Kronos-BSE code, tests, assumptions, roadmaps, results, or project state here unless the project owner explicitly requests a cross-project comparison or migration.
+- Similar terms such as BSE Ltd, Python, backtesting, Zerodha, GitHub, forecasting, or trading do **not** make Kronos-BSE relevant to this repository.
+- When asked "what's next?", "what's left?", "update the brain", or another ambiguous project-continuation question, anchor first to this repository, `PROJECT_STATE.md`, this `AGENTS.md`, and the canonical Trade Brain documents.
+- Treat repository code and canonical project documents as the source of truth over unrelated conversation memory.
+- If current conversation context conflicts with this repository's explicit project boundary, this repository wins unless the owner explicitly changes the project decision.
+
+Before substantial architecture or roadmap work, read `PROJECT_STATE.md` and this file.
+
 This repository is a reframed fork of `pradeepsiddappa/indian-trading-agent`.
 The governing architecture is the Trade Brain control plane documented in:
 
+- `PROJECT_STATE.md`
 - `TRADEBRAIN_REFRAME.md`
 - `TRADEBRAIN_PHASE4.md`
 - `TRADEBRAIN_PHASE5.md`
 - `TRADEBRAIN_PHASE6.md`
 - `TRADEBRAIN_PHASE7_TO_10.md`
 - `TRADEBRAIN_KITE_DATA.md`
+- `TRADEBRAIN_ACTUAL_TRADES.md`
 
 ## Non-negotiable product boundary
 
