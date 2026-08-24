@@ -1,11 +1,11 @@
 name: Trade Brain Dependency Refresh
 
 on:
-  push:
-    branches:
-      - tradebrain/reframe-foundation
+  pull_request:
     paths:
       - ".github/workflows/tradebrain-dependency-refresh.yml"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
   workflow_dispatch:
 
 permissions:
@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   refresh-frontend-security:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
