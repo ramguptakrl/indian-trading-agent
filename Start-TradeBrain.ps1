@@ -22,7 +22,12 @@ if ($FrontendPort -le 0) {
     if ($env:FRONTEND_PORT) { $FrontendPort = [int]$env:FRONTEND_PORT } else { $FrontendPort = 3000 }
 }
 
-$BackendUrl = "http://localhost:$BackendPort/api/health"
+if ($FrontendPort -notin @(3000, 3001)) {
+    throw "FrontendPort must be 3000 or 3001 because those origins are explicitly allowed by the Trade Brain backend."
+}
+
+$BackendHealthUrl = "http://127.0.0.1:$BackendPort/api/health"
+$FrontendHealthUrl = "http://127.0.0.1:$FrontendPort"
 $FrontendUrl = "http://localhost:$FrontendPort"
 $LogDir = Join-Path $RootDir ".tradebrain\logs"
 $BackendOut = Join-Path $LogDir "backend.out.log"
@@ -38,11 +43,13 @@ function Write-Ok([string]$Message)   { Write-Host "[ok]    $Message" -Foregroun
 function Write-Warn([string]$Message) { Write-Host "[warn]  $Message" -ForegroundColor Yellow }
 
 function Get-SystemPython {
-    $py = Get-Command py.exe -ErrorAction SilentlyContinue
-    if ($py) { return @{ File = $py.Source; Prefix = @("-3") } }
-
+    # Prefer python.exe from PATH. This respects an explicitly configured
+    # interpreter (including actions/setup-python and normal Windows PATH).
     $python = Get-Command python.exe -ErrorAction SilentlyContinue
     if ($python) { return @{ File = $python.Source; Prefix = @() } }
+
+    $py = Get-Command py.exe -ErrorAction SilentlyContinue
+    if ($py) { return @{ File = $py.Source; Prefix = @("-3") } }
 
     throw "Python 3.10+ was not found. Install Python from python.org and enable the Python launcher/PATH option."
 }
@@ -66,8 +73,9 @@ function Assert-ToolVersions {
     if (-not $node) { throw "Node.js 20+ was not found. Install Node.js 20 LTS or newer." }
     $nodeVersion = (& $node.Source -p "process.versions.node").Trim()
     if ($LASTEXITCODE -ne 0) { throw "Unable to query Node.js version." }
-    $nodeMajor = [int]($nodeVersion.Split('.')[0])
-    if ($nodeMajor -lt 20) { throw "Node.js $nodeVersion is too old. Trade Brain requires Node.js 20+." }
+    if ([int]($nodeVersion.Split('.')[0]) -lt 20) {
+        throw "Node.js $nodeVersion is too old. Trade Brain requires Node.js 20+."
+    }
 
     $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
     if (-not $npm) { $npm = Get-Command npm.exe -ErrorAction SilentlyContinue }
@@ -88,7 +96,7 @@ function Install-IfNeeded {
 
     $runtimeReady = $false
     try {
-        & $VenvPython -c "import fastapi, uvicorn, aiosqlite, numpy, feedparser, dotenv" 2>$null
+        & $VenvPython -c "import fastapi, uvicorn, aiosqlite, numpy, feedparser, dotenv, langchain_core, tradingagents" 2>$null
         if ($LASTEXITCODE -eq 0) { $runtimeReady = $true }
     } catch { $runtimeReady = $false }
 
@@ -107,11 +115,7 @@ function Install-IfNeeded {
         Write-Step "Installing frontend dependencies..."
         Push-Location (Join-Path $RootDir "frontend")
         try {
-            if (Test-Path "package-lock.json") {
-                & $Tools.Npm ci
-            } else {
-                & $Tools.Npm install
-            }
+            if (Test-Path "package-lock.json") { & $Tools.Npm ci } else { & $Tools.Npm install }
             if ($LASTEXITCODE -ne 0) { throw "npm dependency installation failed." }
         } finally {
             Pop-Location
@@ -123,8 +127,7 @@ function Install-IfNeeded {
 
 function Assert-PortFree([int]$Port) {
     $pids = @()
-    $cmd = Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue
-    if ($cmd) {
+    if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
         $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
         $pids = @($listeners | Select-Object -ExpandProperty OwningProcess -Unique)
     } else {
@@ -138,17 +141,49 @@ function Assert-PortFree([int]$Port) {
     }
 }
 
+function Show-LogTail([string]$Path, [string]$Label) {
+    if (Test-Path $Path) {
+        Write-Warn "$Label last 30 lines:"
+        Get-Content $Path -Tail 30 -ErrorAction SilentlyContinue
+    }
+}
+
 function Wait-Healthy {
-    param([string]$Url, [string]$Label, [System.Diagnostics.Process]$Process, [int]$TimeoutSeconds = 90)
-    for ($elapsed = 0; $elapsed -lt $TimeoutSeconds; $elapsed++) {
-        if ($Process.HasExited) { throw "$Label exited before becoming healthy." }
+    param(
+        [string]$Url,
+        [string]$Label,
+        [System.Diagnostics.Process]$Process,
+        [string]$OutLog,
+        [string]$ErrLog,
+        [int]$TimeoutSeconds = 90
+    )
+
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    $nextProgress = 5
+    while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+        if ($Process.HasExited) {
+            Show-LogTail -Path $OutLog -Label "$Label output"
+            Show-LogTail -Path $ErrLog -Label "$Label errors"
+            throw "$Label exited before becoming healthy (exit code $($Process.ExitCode))."
+        }
         try {
             $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) { return }
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
+                $watch.Stop()
+                return
+            }
         } catch { }
-        if ($elapsed -gt 0 -and ($elapsed % 5) -eq 0) { Write-Step "$Label starting... (${elapsed}s)" }
-        Start-Sleep -Seconds 1
+
+        if ($watch.Elapsed.TotalSeconds -ge $nextProgress) {
+            Write-Step "$Label starting... ($([int]$watch.Elapsed.TotalSeconds)s)"
+            $nextProgress += 5
+        }
+        Start-Sleep -Milliseconds 500
     }
+
+    $watch.Stop()
+    Show-LogTail -Path $OutLog -Label "$Label output"
+    Show-LogTail -Path $ErrLog -Label "$Label errors"
     throw "$Label did not become healthy within $TimeoutSeconds seconds."
 }
 
@@ -160,13 +195,6 @@ function Stop-ProcessTree {
             & "$env:SystemRoot\System32\taskkill.exe" /PID $Process.Id /T /F *> $null
         }
     } catch { }
-}
-
-function Show-LogTail([string]$Path, [string]$Label) {
-    if (Test-Path $Path) {
-        Write-Warn "$Label last 20 lines:"
-        Get-Content $Path -Tail 20 -ErrorAction SilentlyContinue
-    }
 }
 
 Write-Host ""
@@ -225,24 +253,27 @@ try {
         Write-Step "Kite live stream not configured; labelled fallback policy remains available."
     }
 
+    # Keep the browser client pointed at the same backend port chosen here.
+    $env:NEXT_PUBLIC_API_URL = "http://localhost:$BackendPort"
+
     Write-Step "Starting frontend on port $FrontendPort..."
-    $frontendCommand = "npm run dev -- --port $FrontendPort"
     $frontendProcess = Start-Process -FilePath $env:ComSpec `
-        -ArgumentList @("/d", "/s", "/c", $frontendCommand) `
+        -ArgumentList @("/d", "/s", "/c", "npm run dev -- --port $FrontendPort") `
         -WorkingDirectory (Join-Path $RootDir "frontend") `
         -RedirectStandardOutput $FrontendOut `
         -RedirectStandardError $FrontendErr `
         -PassThru
 
-    Wait-Healthy -Url $BackendUrl -Label "Backend" -Process $backendProcess
+    Wait-Healthy -Url $BackendHealthUrl -Label "Backend" -Process $backendProcess -OutLog $BackendOut -ErrLog $BackendErr
     Write-Ok "Backend ready at http://localhost:$BackendPort"
-    Wait-Healthy -Url $FrontendUrl -Label "Frontend" -Process $frontendProcess
+    Wait-Healthy -Url $FrontendHealthUrl -Label "Frontend" -Process $frontendProcess -OutLog $FrontendOut -ErrLog $FrontendErr
     Write-Ok "Frontend ready at $FrontendUrl"
 
     if ($kiteProcess) {
         Start-Sleep -Seconds 1
         if ($kiteProcess.HasExited) {
-            Write-Warn "Kite stream exited; the app will continue without it. See $KiteErr"
+            Write-Warn "Kite stream exited; the app will continue without it."
+            Show-LogTail -Path $KiteErr -Label "Kite errors"
             $kiteProcess = $null
         } else {
             Write-Ok "Kite MARKET_DATA_ONLY stream process running."
@@ -261,28 +292,28 @@ try {
 
     Write-Host ""
     Write-Ok "Trade Brain is running."
-    Write-Host "  Interface:     $FrontendUrl"
-    Write-Host "  Backend logs:  $BackendOut"
-    Write-Host "  Backend errors:$BackendErr"
-    Write-Host "  Frontend logs: $FrontendOut"
-    Write-Host "  Frontend errors:$FrontendErr"
-    if ($kiteProcess) { Write-Host "  Kite live log: $KiteOut" }
+    Write-Host "  Interface:       $FrontendUrl"
+    Write-Host "  Backend output:  $BackendOut"
+    Write-Host "  Backend errors:  $BackendErr"
+    Write-Host "  Frontend output: $FrontendOut"
+    Write-Host "  Frontend errors: $FrontendErr"
+    if ($kiteProcess) { Write-Host "  Kite live output:$KiteOut" }
     Write-Host ""
     Write-Step "Keep this window open. Press Ctrl+C to stop Trade Brain."
 
     while ($true) {
         Start-Sleep -Seconds 2
         if ($backendProcess.HasExited) {
-            Show-LogTail -Path $BackendErr -Label "Backend error log"
+            Show-LogTail -Path $BackendErr -Label "Backend errors"
             throw "Backend exited unexpectedly."
         }
         if ($frontendProcess.HasExited) {
-            Show-LogTail -Path $FrontendErr -Label "Frontend error log"
+            Show-LogTail -Path $FrontendErr -Label "Frontend errors"
             throw "Frontend exited unexpectedly."
         }
         if ($kiteProcess -and $kiteProcess.HasExited) {
             Write-Warn "Kite stream stopped; Trade Brain remains advisory-only and continues through permitted fallback sources."
-            Show-LogTail -Path $KiteErr -Label "Kite error log"
+            Show-LogTail -Path $KiteErr -Label "Kite errors"
             $kiteProcess = $null
         }
     }
