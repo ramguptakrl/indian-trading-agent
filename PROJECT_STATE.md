@@ -42,10 +42,6 @@ Not active:
 - hidden leverage
 - automatic broker order placement
 
-Historical aliases may remain only for compatibility/audit purposes.
-
-## Advisory / execution boundary
-
 Every final Trade Brain output is non-executing:
 
 ```text
@@ -54,7 +50,7 @@ trade_authorization = false
 order_execution_allowed = false
 ```
 
-Safe current candidate labels:
+Safe candidate labels:
 
 - `LONG_CANDIDATE`
 - `SHORT_CANDIDATE`
@@ -69,7 +65,7 @@ AI/LLM output is research evidence and candidate generation, not final authority
 ```text
 market data + provenance
         -> identity / corporate-event memory
-        -> audited history / replay
+        -> audited history / look-ahead-safe replay
         -> structure / regime / broader evidence
         -> multi-agent research
         -> strict candidate parser
@@ -84,17 +80,17 @@ market data + provenance
         -> future evidence / outcome learning
 ```
 
-## Implemented Trade Brain foundation
+## Implemented foundation
 
-The repository contains the Phase 0–10 control/evidence plane, including:
+The repository contains the Trade Brain Phase 0–10 control/evidence plane, including:
 
 - deterministic Entry/SL/TP and protected time/safety rules
 - official security identity/provenance framework
 - corporate-event/document memory
-- audited RAW_UNADJUSTED OHLCV storage and quality checks
+- audited RAW_UNADJUSTED OHLCV and quality checks
 - comparable price eras and derived timeframes
 - look-ahead-safe replay (`ts_close <= as_of`)
-- strict replay outcome states without guessing intrabar order
+- strict replay outcomes without guessing intrabar order
 - Focus Instrument Lab
 - frozen challenger / walk-forward governance
 - human-approved soft runtime only
@@ -103,16 +99,16 @@ The repository contains the Phase 0–10 control/evidence plane, including:
 - verified exchange-calendar capability
 - Crash Guard / regime evidence
 - fail-closed final advisory pipeline
-- frontend analysis/advisory contract
+- browser frontend analysis/advisory contract
 - actual manual trade journal
 
 Hard rules are protected and must not self-optimize.
 
 ## Zerodha / Kite state
 
-Kite has already been implemented as a **read-only `MARKET_DATA_ONLY` data plane**.
+Kite code is already implemented as a **read-only `MARKET_DATA_ONLY` data plane**.
 
-Implemented code supports:
+Implemented capabilities include:
 
 - exact instrument lookup
 - historical REST candles
@@ -148,99 +144,97 @@ Implemented:
 - policy/time violation observations without erasing the real trade
 - dedicated Actual Trades UI
 
-UI actions update the journal only after the human acts externally at the broker. They never place an order.
+Journal UI actions update local evidence only after the human acts externally at the broker. They never place orders.
 
 ## Windows deployment — COMPLETE AND CI-VALIDATED
 
-Native Windows startup is now part of the branch.
-
-Files:
+Native Windows startup is part of the branch:
 
 - `Start-TradeBrain.ps1` — native PowerShell launcher
 - `Start-TradeBrain.bat` — double-click wrapper
 - `WINDOWS_SETUP.md` — Windows setup/use documentation
-- `.github/workflows/tradebrain-windows.yml` — clean-Windows validation workflow
+- `.github/workflows/tradebrain-windows.yml` — clean-Windows end-to-end validation
 
-The Windows launcher now:
+The launcher checks Python/Node, creates the venv, installs dependencies, checks ports without killing unrelated processes, starts FastAPI and Next.js, optionally starts the existing Kite `MARKET_DATA_ONLY` sidecar when credentials exist, opens the browser, writes local logs and cleans up only the process trees it created.
 
-- checks Python 3.10+ and Node.js 20+
-- respects an explicitly configured `python.exe` before the global `py` launcher
-- creates `venv` on first run
-- installs project/runtime Python dependencies when needed
-- installs frontend dependencies when needed
-- fails safely if required ports are already owned by another process
-- starts FastAPI on local IPv4
-- starts the Next.js interface
-- uses IPv4 health probes to avoid Windows `localhost`/IPv6 ambiguity
-- points the frontend at the selected backend port
-- starts the Kite `MARKET_DATA_ONLY` sidecar only when required Kite runtime fields exist
-- opens the browser in normal mode
-- writes local logs under `.tradebrain\logs`
-- stops only the process trees it created
-- exposes `-CheckOnly`, `-SetupOnly`, `-NoBrowser`, and `-SmokeTest` modes
+### Validated Windows baseline
 
-### Windows validation result
+Trade Brain Windows run **#6** (`32682639112`) on runtime head `3c2af88cb59beaf3e367d51cd118b3210b65653f` completed SUCCESS, and the documentation-triggered **run #7** also completed SUCCESS.
 
-GitHub Actions **Trade Brain Windows run #6** (`32682639112`) on head `3c2af88cb59beaf3e367d51cd118b3210b65653f` completed **SUCCESS**.
+Validated on clean Windows Server 2025 with Python 3.11.9 / Node.js 20.20.2:
 
-Validated on a clean Windows Server 2025 runner with Python 3.11.9 and Node.js 20.20.2:
-
-- PowerShell parser: PASS
+- PowerShell parse: PASS
 - prerequisite preflight: PASS
-- double-click BAT wrapper: PASS
-- fresh Python virtual environment creation: PASS
-- Python dependency installation: PASS
-- frontend dependency installation: PASS
-- backend startup: PASS
-- `/api/health` reachable: PASS
-- frontend startup: PASS
-- frontend health reachable: PASS
+- BAT wrapper: PASS
+- fresh venv: PASS
+- Python dependency install: PASS
+- frontend dependency install: PASS
+- backend startup / `/api/health`: PASS
+- frontend startup / health: PASS
 - end-to-end Windows smoke: PASS
 - cleanup: PASS
 
-The smoke explicitly reported:
+The supported UI is the Next.js browser interface opened by the Windows launcher. A packaged `.exe` is optional future packaging, not required for current Windows operation.
+
+## Frontend production security — PATCHED AND GATED
+
+A production-only npm audit was added instead of ignoring installation warnings.
+
+The first production audit correctly FAILED and exposed high-severity advisories in the prior dependency tree, including the `next@16.2.3` line and affected transitive packages.
+
+Remediation was then performed through a controlled CI job that was required to pass both the production audit and production build before writing the new lockfile.
+
+Validated dependency refresh run **#2** (`32683166357`) completed SUCCESS and committed the validated package/lock refresh as branch head `0f87cea764cc2eb6f8c9324321ef9ec8baf9c0a7`.
+
+Current key frontend versions:
 
 ```text
-Windows end-to-end smoke passed: backend + frontend became healthy.
+next = 16.3.2
+eslint-config-next = 16.3.2
+react = 19.2.4
+react-dom = 19.2.4
 ```
 
-This validates the browser-based Trade Brain interface on Windows through the native one-button launcher. It is not a packaged `.exe`; the supported UI remains the Next.js browser interface.
+The refresh job passed:
 
-## General validation checkpoint
+- locked dependency installation: PASS
+- explicit patched Next.js upgrade: PASS
+- compatible transitive `npm audit fix`: PASS
+- `npm audit --omit=dev --audit-level=high`: PASS
+- `npm run build`: PASS
+- validated package.json/package-lock.json commit: PASS
 
-On the same runtime head, **Trade Brain Foundation run #318** (`32682639110`) completed successfully across its jobs.
+Permanent guardrail:
 
-Validated areas include:
+- `.github/workflows/tradebrain-security.yml` independently audits production dependencies for high/critical vulnerabilities.
+- `.github/workflows/tradebrain-dependency-refresh.yml` provides a controlled/manual refresh path and never commits a refresh unless the production audit and frontend build both pass.
 
-- frontend production contract/build: PASS
-- Python integration compile: PASS
-- Trade Brain unit/integration suite: PASS
-- Unix launcher syntax: PASS
-- Phase 2 observational smoke: PASS / observational only
-- Phase 3 observational smoke: PASS / observational only
-- Phase 4 observational smoke: PASS / observational only
-- Phase 5 observational smoke: PASS / observational only
-- Phase 6 observational smoke: PASS / observational only
-- Phase 10 observational smoke: PASS / observational only
-- current BSE descriptive evidence rebuild/upload: PASS
+## General validation baseline
 
-The immediately preceding full checkpoint ran **136 / 136 Trade Brain tests successfully**; the Windows launcher changes did not change Trade Brain runtime logic and the same Foundation suite remains green.
+Trade Brain Foundation run **#318** (`32682639110`) completed successfully on the pre-security-remediation runtime head and validated:
+
+- frontend production contract/build
+- Python integration compile
+- Trade Brain tests
+- Unix launcher syntax
+- Phase 2/3/4/5/6/10 observational smokes
+- BSE descriptive evidence rebuild/upload
+
+The immediately preceding full checkpoint recorded **136 / 136 Trade Brain tests passing**.
+
+The patched frontend dependency commit does not modify Trade Brain decision logic. Normal Foundation, Windows and Security workflows are rerun after the patched dependency head to independently reconfirm the deployment baseline.
 
 ## BSE evidence state
 
 The BSE evidence baseline is deliberately descriptive/exploratory rather than a strategy-performance claim.
 
-`BSE_PROSPECTIVE_HYPOTHESIS_001` was frozen for **future-only evidence after 2026-08-21**.
+`BSE_PROSPECTIVE_HYPOTHESIS_001` was frozen for **future-only evidence after 2026-08-21**. Historical observations used to create it must not be backfilled as untouched validation.
 
-Historical observations used to create that hypothesis must not be backfilled as untouched validation.
-
-The current evidence build still reports that the hypothesis **NEEDS_MORE_DATA**. This is expected: future market evidence must occur naturally and cannot be manufactured by code.
-
-The prospective collector, schema, tests and API are already implemented. Remaining work here is accumulation of post-freeze BSE sessions and evaluation only after predefined sample/coverage gates are met.
+The prospective collector, schema, tests and API are implemented. The hypothesis currently remains **NEEDS_MORE_DATA**, which is expected because untouched post-freeze market sessions must occur naturally before predefined evidence gates can be met.
 
 ## What is actually left
 
-The architecture should not keep expanding with random features. At this checkpoint, the remaining work is external/ongoing rather than another large missing subsystem.
+At this checkpoint there is no identified large missing non-Kite software subsystem. Remaining work is external or naturally ongoing:
 
 ### 1. Authenticate and validate real Kite data when credentials are supplied
 
@@ -261,7 +255,7 @@ Do **not** add order endpoints.
 - collect future post-freeze sessions
 - never backfill pre-freeze observations into the prospective sample
 - wait for predefined sample gates before performance claims
-- evaluate frozen benchmark/challenger rules after sufficient evidence exists
+- evaluate frozen benchmark/challenger rules only after sufficient untouched evidence exists
 
 ### 3. Use the actual-trade journal when the human takes a trade
 
@@ -280,7 +274,7 @@ Trade Brain advisory
 - additional hypotheses through the frozen-evidence protocol
 - packaging the browser UI into a native `.exe` shell
 
-None of these should silently introduce broker order execution.
+None of these may silently introduce broker order execution.
 
 ## Repository / PR rule
 
