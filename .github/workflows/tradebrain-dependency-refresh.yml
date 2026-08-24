@@ -1,0 +1,65 @@
+name: Trade Brain Dependency Refresh
+
+on:
+  push:
+    branches:
+      - tradebrain/reframe-foundation
+    paths:
+      - ".github/workflows/tradebrain-dependency-refresh.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-frontend-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tradebrain/reframe-foundation
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install locked dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Upgrade patched Next.js line
+        working-directory: frontend
+        run: |
+          npm install --save-exact next@16.3.2
+          npm install --save-dev --save-exact eslint-config-next@16.3.2
+
+      - name: Apply compatible transitive security fixes
+        working-directory: frontend
+        run: npm audit fix
+
+      - name: Require clean high/critical production audit
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Require production frontend build
+        working-directory: frontend
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build
+
+      - name: Commit validated dependency lock refresh
+        shell: bash
+        run: |
+          if git diff --quiet -- frontend/package.json frontend/package-lock.json; then
+            echo "No dependency changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/package.json frontend/package-lock.json
+          git commit -m "fix(frontend): patch production dependency advisories"
+          git push origin HEAD:tradebrain/reframe-foundation
