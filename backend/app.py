@@ -42,6 +42,7 @@ from backend.tradebrain.focus_lab_store import ensure_focus_lab_schema
 from backend.tradebrain.kite_stream import ensure_kite_live_schema
 from backend.tradebrain.market_data_store import ensure_market_data_schema
 from backend.tradebrain.market_source_policy import market_source_status
+from backend.tradebrain.mtf_paper_ledger import ensure_mtf_paper_schema
 from backend.tradebrain.paper_ledger import ensure_paper_ledger_schema
 from backend.tradebrain.prospective_gap import ensure_prospective_gap_schema
 from backend.tradebrain.regime_hardening import install_phase4_regime_hardening
@@ -59,6 +60,7 @@ async def lifespan(app: FastAPI):
     ensure_focus_lab_schema()
     ensure_challenger_schema()
     ensure_paper_ledger_schema()
+    ensure_mtf_paper_schema()
     ensure_exchange_calendar_schema()
     ensure_advisory_schema()
     ensure_evidence_schema()
@@ -145,6 +147,7 @@ def health():
         "market_source_preference": market_source_status(),
         "resident_equity_cost_engine": True,
         "net_cost_paper_ledger": True,
+        "mtf_swing_paper_ledger": True,
         "actual_manual_trade_journal": True,
         "actual_trades_link_to_advisory_snapshot": True,
         "actual_trade_partial_close": True,
