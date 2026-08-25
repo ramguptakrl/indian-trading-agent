@@ -40,6 +40,50 @@ def _base(path):
     )
 
 
+def test_non_bse_target_is_rejected_before_live_guard_or_policy():
+    tmp, path = _db()
+    try:
+        payload = _base(path)
+        payload["ticker"] = "INFY"
+        try:
+            evaluate_live_guarded_advisory(
+                **payload, last_price=100.0, lower_limit=80.0, upper_limit=120.0
+            )
+            raise AssertionError("expected BSE-only scope failure")
+        except ValueError as exc:
+            assert "BSE Ltd-only" in str(exc)
+    finally:
+        tmp.cleanup()
+
+
+def test_noncanonical_exchange_is_rejected_for_bse_target():
+    tmp, path = _db()
+    try:
+        payload = _base(path)
+        payload["exchange"] = "BSE"
+        try:
+            evaluate_live_guarded_advisory(
+                **payload, last_price=100.0, lower_limit=80.0, upper_limit=120.0
+            )
+            raise AssertionError("expected canonical exchange failure")
+        except ValueError as exc:
+            assert "NSE:BSE" in str(exc)
+    finally:
+        tmp.cleanup()
+
+
+def test_missing_live_price_fails_closed():
+    tmp, path = _db()
+    try:
+        result = evaluate_live_guarded_advisory(
+            **_base(path), last_price=None, lower_limit=80.0, upper_limit=120.0
+        )
+        assert result["final_status"] == "BLOCK_LIVE_PRICE_UNVERIFIED"
+        assert result["trade_authorization"] is False
+    finally:
+        tmp.cleanup()
+
+
 def test_missing_price_range_fails_closed():
     tmp, path = _db()
     try:
@@ -65,6 +109,22 @@ def test_freak_tick_requires_confirmation_before_pass():
             best_ask=104.1,
         )
         assert result["final_status"] == "BLOCK_DATA_CONFIRMATION_REQUIRED"
+    finally:
+        tmp.cleanup()
+
+
+def test_potential_market_wide_circuit_requires_confirmation():
+    tmp, path = _db()
+    try:
+        result = evaluate_live_guarded_advisory(
+            **_base(path),
+            last_price=100.0,
+            lower_limit=80.0,
+            upper_limit=120.0,
+            index_move_pct=-10.5,
+            halt_confirmed=False,
+        )
+        assert result["final_status"] == "BLOCK_HALT_CONFIRMATION_REQUIRED"
     finally:
         tmp.cleanup()
 
@@ -99,6 +159,8 @@ def test_normal_verified_market_state_can_reach_existing_advisory_pass():
         )
         assert result["final_status"] == "ADVISORY_CANDIDATE_PASS"
         assert result["market_guard_checked_before_advisory"] is True
+        assert result["bse_scope_checked_before_advisory"] is True
         assert result["market_guard"]["hard_block_new_entries"] is False
+        assert result["order_execution_allowed"] is False
     finally:
         tmp.cleanup()
