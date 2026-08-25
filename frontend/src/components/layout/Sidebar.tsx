@@ -4,13 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Home,
-  Sparkles,
-  Radar,
-  Target,
   Search,
   CandlestickChart,
-  Award,
-  FlaskConical,
   History,
   Settings,
   TrendingUp,
@@ -31,47 +26,34 @@ type NavGroup = {
   items: NavItem[];
 };
 
+// Trade Brain is intentionally a BSE Ltd product. Generic ITA discovery surfaces such as
+// Top Picks, multi-stock scanning, watchlists and generic strategy catalogs are not part of
+// the BSE runtime navigation. Broader market information survives only as BSE context.
 const navGroups: NavGroup[] = [
   {
     items: [
-      { href: "/", label: "Today", icon: Home, hint: "Your daily workflow" },
+      { href: "/", label: "BSE Today", icon: Home, hint: "BSE decision workspace" },
     ],
   },
   {
-    title: "DISCOVER",
+    title: "DECIDE",
     items: [
-      { href: "/recommendations", label: "Top Picks", icon: Sparkles, hint: "Research recommendations" },
-      { href: "/scanner", label: "Market Scan", icon: Radar, hint: "Gap / Volume / Breakout" },
-      { href: "/strategies", label: "Strategies", icon: Target, hint: "S/R, Cyclical patterns" },
-      { href: "/news", label: "News Feed", icon: Newspaper, hint: "RSS + customizable" },
+      { href: "/analysis", label: "BSE Analysis", icon: Search, hint: "INTRADAY / SWING research + levels" },
+      { href: "/charts", label: "Price & Structure", icon: CandlestickChart, hint: "Audited BSE price path" },
+      { href: "/news", label: "BSE Context", icon: Newspaper, hint: "Market, regulatory & company context" },
     ],
   },
   {
-    title: "ANALYZE",
+    title: "EVIDENCE",
     items: [
-      { href: "/analysis", label: "Deep Analysis", icon: Search, hint: "AI research + Trade Brain gate" },
-      { href: "/charts", label: "Charts", icon: CandlestickChart, hint: "Audited price path" },
+      { href: "/insights", label: "BSE Evidence", icon: Brain, hint: "Replay, study & learning evidence" },
+      { href: "/history", label: "Analysis Outcomes", icon: History, hint: "BSE research outcomes" },
     ],
   },
   {
     title: "TRACK",
     items: [
-      { href: "/trades", label: "Actual Trades", icon: BriefcaseBusiness, hint: "Trades you really took" },
-      { href: "/history", label: "Analysis Outcomes", icon: History, hint: "Observed research outcomes" },
-    ],
-  },
-  {
-    title: "VALIDATE",
-    items: [
-      { href: "/performance", label: "Performance", icon: Award, hint: "Strategy evidence" },
-      { href: "/simulation", label: "Simulation", icon: FlaskConical, hint: "Paper trade + backtest" },
-      { href: "/insights", label: "Learning Insights", icon: Brain, hint: "Evidence summaries" },
-      { href: "/signals", label: "Signal Performance", icon: TrendingUp, hint: "Legacy heuristic evidence" },
-      { href: "/verdict-calibration", label: "Verdict Calibration", icon: Target, hint: "Legacy verdict evidence" },
-      { href: "/confidence-calibration", label: "Confidence Calibration", icon: Award, hint: "Probability calibration" },
-      { href: "/shadow-trades", label: "Shadow Trades", icon: Search, hint: "Counterfactual skipped trades" },
-      { href: "/memory-admin", label: "Memory Admin", icon: Brain, hint: "Inspect + prune agent memories" },
-      { href: "/backtest", label: "AI Backtest", icon: FlaskConical, hint: "AI research on past dates" },
+      { href: "/trades", label: "Actual Trades", icon: BriefcaseBusiness, hint: "BSE trades you really took" },
     ],
   },
   {
@@ -91,7 +73,8 @@ export function Sidebar() {
           <TrendingUp className="h-6 w-6 text-green-500" />
           <div>
             <h1 className="font-bold text-lg">Trade Brain</h1>
-            <p className="text-xs text-muted-foreground">NSE/BSE · INTRADAY + SWING</p>
+            <p className="text-xs text-muted-foreground">BSE LTD · NSE:BSE</p>
+            <p className="text-[10px] text-muted-foreground/80 mt-0.5">INTRADAY + SWING</p>
           </div>
         </div>
       </div>
@@ -136,7 +119,8 @@ export function Sidebar() {
 
       <div className="p-4 border-t border-border">
         <div className="text-[10px] text-muted-foreground">
-          <p>Trade Brain advisory only</p>
+          <p>BSE Ltd is the only trade target</p>
+          <p className="mt-0.5">Broader market: context only</p>
           <p className="mt-0.5">Price: Kite-primary · audited fallback</p>
           <p className="mt-0.5">Broker order execution: OFF</p>
         </div>
