@@ -1,49 +1,67 @@
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
 from backend.routers import analysis_horizons
 from backend.routers.analysis_horizons import HorizonAnalysisRequest
-from tradingagents.agents.managers.portfolio_manager import _horizon_instruction as manager_horizon
-from tradingagents.agents.trader.trader import _horizon_instruction as trader_horizon
+from tradingagents.horizon_policy import horizon_instruction
 
 
-def test_horizon_instructions_do_not_allow_mode_substitution():
-    intraday = trader_horizon("INTRADAY") + manager_horizon("INTRADAY")
-    swing = trader_horizon("SWING") + manager_horizon("SWING")
+class TradeBrainHorizonAnalysisTests(unittest.TestCase):
+    def test_horizon_instructions_do_not_allow_mode_substitution(self):
+        intraday = horizon_instruction("INTRADAY")
+        swing = horizon_instruction("SWING")
 
-    assert "MUST be INTRADAY" in intraday
-    assert "Do not switch to SWING" in intraday
-    assert "MUST be SWING" in swing
-    assert "Direction` MUST be LONG" in swing
-    assert "Do not switch to INTRADAY" in swing
-    assert "Zerodha MTF only" in swing
-    assert "Never invent" in swing
+        self.assertIn("MUST be INTRADAY", intraday)
+        self.assertIn("Do not switch to SWING", intraday)
+        self.assertIn("15:10 IST", intraday)
+        self.assertIn("15:15 IST", intraday)
+        self.assertIn("MUST be SWING", swing)
+        self.assertIn("Direction` MUST be LONG", swing)
+        self.assertIn("Do not switch to INTRADAY", swing)
+        self.assertIn("Zerodha MTF only", swing)
+        self.assertIn("Never invent", swing)
+        self.assertIn("own-cash/CNC substitute", swing)
+
+    def test_trader_and_manager_share_horizon_policy_source(self):
+        root = Path(__file__).resolve().parents[1]
+        trader_source = (root / "tradingagents/agents/trader/trader.py").read_text(encoding="utf-8")
+        manager_source = (root / "tradingagents/agents/managers/portfolio_manager.py").read_text(encoding="utf-8")
+
+        for source in (trader_source, manager_source):
+            self.assertIn("from tradingagents.horizon_policy import horizon_instruction", source)
+            self.assertNotIn("def _horizon_instruction", source)
+            self.assertNotIn("MTF disabled", source)
+            self.assertNotIn("funded with the trader's own cash", source)
+
+    def test_run_horizon_pair_launches_two_independent_modes(self):
+        calls = []
+
+        def fake_launch(req, mode):
+            calls.append(mode)
+            return f"task-{mode.lower()}"
+
+        with patch.object(analysis_horizons, "_launch", side_effect=fake_launch):
+            result = analysis_horizons.run_horizon_pair(
+                HorizonAnalysisRequest(ticker="BSE", trade_date="2026-08-25")
+            )
+
+        self.assertEqual(calls, ["INTRADAY", "SWING"])
+        self.assertEqual(
+            result["tasks"],
+            {"INTRADAY": "task-intraday", "SWING": "task-swing"},
+        )
+        self.assertTrue(result["independent_graph_runs"])
+        self.assertFalse(result["shared_final_decision"])
+        self.assertFalse(result["horizon_substitution_allowed"])
+        self.assertEqual(result["swing_funding"], "ZERODHA_MTF_ONLY")
+        self.assertFalse(result["order_execution_allowed"])
+
+    def test_non_bse_target_is_rejected(self):
+        with self.assertRaises(Exception) as ctx:
+            HorizonAnalysisRequest(ticker="RELIANCE", trade_date="2026-08-25")
+        self.assertIn("BSE", str(ctx.exception))
 
 
-def test_run_horizon_pair_launches_two_independent_modes(monkeypatch):
-    calls = []
-
-    def fake_launch(req, mode):
-        calls.append(mode)
-        return f"task-{mode.lower()}"
-
-    monkeypatch.setattr(analysis_horizons, "_launch", fake_launch)
-    result = analysis_horizons.run_horizon_pair(
-        HorizonAnalysisRequest(ticker="BSE", trade_date="2026-08-25")
-    )
-
-    assert calls == ["INTRADAY", "SWING"]
-    assert result["tasks"] == {
-        "INTRADAY": "task-intraday",
-        "SWING": "task-swing",
-    }
-    assert result["independent_graph_runs"] is True
-    assert result["shared_final_decision"] is False
-    assert result["horizon_substitution_allowed"] is False
-    assert result["swing_funding"] == "ZERODHA_MTF_ONLY"
-    assert result["order_execution_allowed"] is False
-
-
-def test_non_bse_target_is_rejected():
-    try:
-        HorizonAnalysisRequest(ticker="RELIANCE", trade_date="2026-08-25")
-        raise AssertionError("expected BSE-only validation error")
-    except Exception as exc:
-        assert "BSE" in str(exc)
+if __name__ == "__main__":
+    unittest.main()
