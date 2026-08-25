@@ -55,9 +55,15 @@ class OpenAIClient(BaseLLMClient):
         self.provider = provider.lower()
 
     def get_llm(self) -> Any:
-        """Return configured ChatOpenAI instance."""
+        """Return configured ChatOpenAI instance with bounded transient retries."""
         self.warn_if_unknown_model()
-        llm_kwargs = {"model": self.model}
+        llm_kwargs = {
+            "model": self.model,
+            # Keep provider hiccups from failing a whole graph immediately, while
+            # remaining bounded so Trade Brain can still move to its alternate provider.
+            "timeout": 60,
+            "max_retries": 2,
+        }
 
         # Provider-specific base URL and auth
         if self.provider in _PROVIDER_CONFIG:
@@ -72,7 +78,7 @@ class OpenAIClient(BaseLLMClient):
         elif self.base_url:
             llm_kwargs["base_url"] = self.base_url
 
-        # Forward user-provided kwargs
+        # Forward user-provided kwargs; explicit config overrides safe defaults.
         for key in _PASSTHROUGH_KWARGS:
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
