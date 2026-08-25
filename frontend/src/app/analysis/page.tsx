@@ -26,7 +26,7 @@ export default function AnalysisPage() {
   const [tradeDateInput, setTradeDateInput] = useState(analysis.tradeDate || "");
   const [indiaToday, setIndiaToday] = useState("");
   const [selectedAnalysts, setSelectedAnalysts] = useState<string[]>([
-    "market", "social", "news", "fundamentals",
+    "market", "news", "fundamentals",
   ]);
   const [depth, setDepth] = useState(1);
   const [language, setLanguage] = useState("English");
