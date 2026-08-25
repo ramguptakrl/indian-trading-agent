@@ -6,10 +6,12 @@ DEFAULT_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")),
     "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
-    # LLM settings
-    "llm_provider": "anthropic",
-    "deep_think_llm": "claude-sonnet-4-20250514",
-    "quick_think_llm": "claude-haiku-4-5-20251001",
+    # LLM settings. Trade Brain defaults to Google Gemini; Anthropic is optional.
+    # Gemini 3.6 Flash is the stable primary model for the agent loop, while
+    # Gemini 3.1 Pro Preview is available for deeper reasoning when selected.
+    "llm_provider": "google",
+    "deep_think_llm": "gemini-3.1-pro-preview",
+    "quick_think_llm": "gemini-3.6-flash",
     "google_thinking_level": None,
     "openai_reasoning_effort": None,
     "anthropic_effort": None,
