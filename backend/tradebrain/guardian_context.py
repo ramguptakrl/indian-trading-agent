@@ -1,8 +1,9 @@
 """Automatic local evidence context for the BSE Position Guardian.
 
 This module never fetches unaudited live web data. It reads Trade Brain's point-in-time
-official corporate-event memory, first-seen news archive, and audited completed BSE daily
-bars. Missing evidence stays UNKNOWN rather than being guessed.
+official corporate-event memory, first-seen news archive, audited completed BSE daily
+bars, and an independently audited local NIFTY 50 context series. Missing evidence stays
+UNKNOWN rather than being guessed.
 """
 
 from __future__ import annotations
@@ -11,15 +12,26 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from backend.tradebrain.context_index import nifty50_correction_context
 from backend.tradebrain.corporate_actions import corporate_action_context
 from backend.tradebrain.corporate_event_store import list_events
 from backend.tradebrain.market_data_store import find_series
 from backend.tradebrain.news_archive import query_news_known_by
 from backend.tradebrain.regime_hardening import classify_instrument_regime_recent
 
-METHOD_VERSION = "BSE_GUARDIAN_LOCAL_CONTEXT_V1"
+METHOD_VERSION = "BSE_GUARDIAN_LOCAL_CONTEXT_V2_NIFTY_AUDITED"
 IST = ZoneInfo("Asia/Kolkata")
 _RANK = {"UNKNOWN": 0, "NORMAL": 1, "ELEVATED": 2, "HIGH": 3, "CRITICAL": 4}
+_CORRECTION_RANK = {
+    "UNKNOWN": 0,
+    "TREND_UP": 1,
+    "RANGE": 1,
+    "HIGH_VOL": 2,
+    "TREND_DOWN": 3,
+    "HIGH_VOL_TREND_DOWN": 4,
+    "SEVERE_CORRECTION": 5,
+    "CRASH_RISK": 6,
+}
 _CRITICAL_TERMS = (
     "trading halt", "suspension of trading", "insolvency", "bankruptcy", "default",
     "fraud", "cyber attack", "cyberattack", "data breach", "regulatory ban",
@@ -44,6 +56,11 @@ def _dt(value: str | datetime | None) -> datetime | None:
 
 def _max_risk(*values: str) -> str:
     return max((str(value or "UNKNOWN").upper() for value in values), key=lambda x: _RANK.get(x, 0), default="UNKNOWN")
+
+
+def _max_correction(*values: str) -> str:
+    normalized = [str(value or "UNKNOWN").upper() for value in values]
+    return max(normalized, key=lambda x: _CORRECTION_RANK.get(x, 0), default="UNKNOWN")
 
 
 def _text_risk(text: str) -> str:
@@ -132,7 +149,6 @@ def build_guardian_context(
 ) -> dict[str, Any]:
     now = _dt(evaluated_at) or datetime.now(timezone.utc)
     # Inbox status is a human workflow state, not an evidence-retention boundary.
-    # Reviewed/archived official events must remain available to point-in-time risk logic.
     events = list_events(status=None, limit=500, db_path=db_path)
     official = _event_risk(events, now=now)
     action = corporate_action_context(
@@ -162,16 +178,29 @@ def build_guardian_context(
             regime = classify_instrument_regime_recent(
                 str(series["series_id"]), as_of=now.isoformat(), db_path=db_path
             )
-            correction_state = _correction_from_regime(regime)
+            bse_correction_state = _correction_from_regime(regime)
             correction_status = "AUDITED_BSE_DAILY_CONTEXT"
         except Exception as exc:
             regime = {"regime": "UNKNOWN", "error_type": type(exc).__name__}
-            correction_state = "UNKNOWN"
+            bse_correction_state = "UNKNOWN"
             correction_status = "UNAVAILABLE"
     else:
         regime = {"regime": "UNKNOWN", "reason": "No audited NSE:BSE market series is stored"}
-        correction_state = "UNKNOWN"
+        bse_correction_state = "UNKNOWN"
         correction_status = "NO_AUDITED_BSE_SERIES"
+
+    try:
+        broader = nifty50_correction_context(as_of=now, db_path=db_path)
+    except Exception as exc:
+        broader = {
+            "status": "UNAVAILABLE",
+            "correction_state": "UNKNOWN",
+            "error_type": type(exc).__name__,
+            "hard_external_web_fetch_used": False,
+        }
+    broader_state = str(broader.get("correction_state") or "UNKNOWN").upper()
+    broader_complete = broader.get("status") == "AUDITED_NIFTY_DAILY_CONTEXT"
+    combined_correction = _max_correction(bse_correction_state, broader_state)
 
     return {
         "method_version": METHOD_VERSION,
@@ -180,11 +209,14 @@ def build_guardian_context(
         "official_event_context": official,
         "news_context": news_state,
         "corporate_action_context": action,
-        "correction_state": correction_state,
+        "correction_state": combined_correction,
         "correction_context_status": correction_status,
+        "bse_correction_state": bse_correction_state,
         "audited_bse_regime": regime,
-        "broader_market_correction_state": "UNKNOWN",
-        "broader_market_correction_auto_complete": False,
+        "broader_market_correction_state": broader_state,
+        "broader_market_context": broader,
+        "broader_market_correction_auto_complete": broader_complete,
+        "broader_market_source_required": "ZERODHA_KITE_CONNECT_MARKET_DATA_ONLY",
         "hard_external_web_fetch_used": False,
         "unknown_evidence_is_not_guessed": True,
         "trade_authorization": False,
