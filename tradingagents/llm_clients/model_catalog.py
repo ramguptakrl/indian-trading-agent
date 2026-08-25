@@ -38,16 +38,24 @@ MODEL_OPTIONS: ProviderModeOptions = {
     },
     "google": {
         "quick": [
-            ("Gemini 3 Flash - Next-gen fast", "gemini-3-flash-preview"),
-            ("Gemini 2.5 Flash - Balanced, stable", "gemini-2.5-flash"),
-            ("Gemini 3.1 Flash Lite - Most cost-efficient", "gemini-3.1-flash-lite-preview"),
-            ("Gemini 2.5 Flash Lite - Fast, low-cost", "gemini-2.5-flash-lite"),
+            ("Gemini 3.6 Flash - Stable primary, fast agentic loops", "gemini-3.6-flash"),
+            ("Gemini 3.5 Flash - Stable frontier Flash", "gemini-3.5-flash"),
+            ("Gemini 3.5 Flash-Lite - Stable high-throughput", "gemini-3.5-flash-lite"),
+            ("Gemini 2.5 Flash - Stable legacy option", "gemini-2.5-flash"),
         ],
         "deep": [
-            ("Gemini 3.1 Pro - Reasoning-first, complex workflows", "gemini-3.1-pro-preview"),
-            ("Gemini 3 Flash - Next-gen fast", "gemini-3-flash-preview"),
-            ("Gemini 2.5 Pro - Stable pro model", "gemini-2.5-pro"),
-            ("Gemini 2.5 Flash - Balanced, stable", "gemini-2.5-flash"),
+            ("Gemini 3.1 Pro - Advanced reasoning (preview)", "gemini-3.1-pro-preview"),
+            ("Gemini 3.6 Flash - Stable primary, strong reasoning", "gemini-3.6-flash"),
+            ("Gemini 3.5 Flash - Stable frontier Flash", "gemini-3.5-flash"),
+            ("Gemini 2.5 Pro - Stable legacy option", "gemini-2.5-pro"),
+        ],
+    },
+    "groq": {
+        "quick": [
+            ("GPT-OSS 20B on Groq - very fast tool-capable inference", "openai/gpt-oss-20b"),
+        ],
+        "deep": [
+            ("GPT-OSS 20B on Groq - reasoning + tool use", "openai/gpt-oss-20b"),
         ],
     },
     "xai": {
