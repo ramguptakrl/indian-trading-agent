@@ -1,7 +1,7 @@
-"""Safe LLM capacity failover helpers for Trade Brain Deep Analysis.
+"""Safe LLM capacity/follow-up provider helpers for Trade Brain Deep Analysis.
 
-This module is intentionally credential-blind: it only checks whether a fallback key is
-present in the local process environment. It never returns, logs, or persists API keys.
+This module is credential-blind: it only checks whether alternate provider credentials
+exist in the local process environment. It never returns, logs, or persists API keys.
 """
 
 from __future__ import annotations
@@ -29,36 +29,59 @@ def is_retryable_llm_capacity_error(exc: BaseException) -> bool:
 
 
 def get_capacity_fallback_config(config: dict[str, Any]) -> dict[str, Any] | None:
-    """Return a one-shot Groq fallback config when Google capacity is exhausted.
+    """Return one alternate provider config for a retryable capacity failure.
 
-    The fallback is deliberately narrow: Google Gemini -> Groq only, and only when a
-    local GROQ_API_KEY is already configured. Protected Trade Brain policy fields are
-    copied unchanged.
+    Normal BSE architecture is Groq primary + Gemini verifier. Capacity failover remains
+    symmetric so a user who explicitly selected Google can still fall back to Groq.
+    Protected Trade Brain policy fields are copied unchanged.
     """
-    if str(config.get("llm_provider") or "").strip().lower() != "google":
-        return None
-    if not (os.getenv("GROQ_API_KEY") or "").strip():
-        return None
-
+    provider = str(config.get("llm_provider") or "").strip().lower()
     fallback = dict(config)
-    fallback["llm_provider"] = "groq"
-    fallback["deep_think_llm"] = "openai/gpt-oss-20b"
-    fallback["quick_think_llm"] = "openai/gpt-oss-20b"
-    # Provider-specific Gemini tuning must not leak into Groq.
-    fallback["google_thinking_level"] = None
-    return fallback
+
+    if provider == "groq" and (os.getenv("GOOGLE_API_KEY") or "").strip():
+        fallback["llm_provider"] = "google"
+        fallback["deep_think_llm"] = "gemini-3.6-flash"
+        fallback["quick_think_llm"] = "gemini-3.6-flash"
+        return fallback
+
+    if provider == "google" and (os.getenv("GROQ_API_KEY") or "").strip():
+        fallback["llm_provider"] = "groq"
+        fallback["deep_think_llm"] = "openai/gpt-oss-20b"
+        fallback["quick_think_llm"] = "openai/gpt-oss-20b"
+        fallback["google_thinking_level"] = None
+        return fallback
+
+    return None
+
+
+def get_material_verifier_config(config: dict[str, Any]) -> dict[str, Any] | None:
+    """Return Gemini verifier metadata when Groq is primary and Google is configured.
+
+    The analysis runtime may use this only for material findings; it must not call the
+    verifier for every market tick. The returned object contains no credential.
+    """
+    provider = str(config.get("llm_provider") or "").strip().lower()
+    if provider != "groq" or not (os.getenv("GOOGLE_API_KEY") or "").strip():
+        return None
+    return {
+        "provider": "google",
+        "model": str(config.get("llm_verifier_model") or "gemini-3.6-flash"),
+        "material_findings_only": True,
+        "trade_authorization": False,
+        "order_execution_allowed": False,
+    }
 
 
 def public_capacity_error(exc: BaseException, *, fallback_available: bool) -> str:
     """Return a concise user-safe message instead of a provider SDK error dump."""
     if fallback_available:
         return (
-            "The primary AI provider hit a temporary quota/rate limit and the alternate "
-            "provider also could not complete the analysis. Please retry shortly or review "
-            "Settings > Models & Keys."
+            "The primary AI provider hit a temporary quota/rate limit and the configured "
+            "alternate provider also could not complete the analysis. Retry after the "
+            "cooldown or review Settings > Models & Keys."
         )
     return (
-        "Google Gemini hit a temporary quota/rate limit. Configure and test Groq under "
-        "Settings > Models & Keys for automatic failover, or retry after the provider's "
-        "cooldown period."
+        "The selected AI provider hit a temporary quota/rate limit and no configured "
+        "alternate provider is currently available. Retry after the provider cooldown "
+        "or review Settings > Models & Keys."
     )
