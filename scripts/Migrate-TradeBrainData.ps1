@@ -80,9 +80,29 @@ if ($envText -match '(?m)^TRADEBRAIN_DATA_DIR=.*$') {
 Write-Host "[env] TRADEBRAIN_DATA_DIR now points to $DestRoot" -ForegroundColor Green
 
 # Verify that the freshly pulled code resolves the D-drive DB and that BSE candles exist.
+# Pipe a literal Python program over stdin so PowerShell never parses SQL punctuation.
+$VerificationPython = @'
+from dotenv import load_dotenv
+load_dotenv(".env", override=True)
+
+import sqlite3
+import backend.db as d
+
+print("Resolved DB:", d.DB_PATH)
+conn = sqlite3.connect(d.DB_PATH)
+rows = conn.execute(
+    "SELECT interval, COUNT(1) FROM tb_ohlcv_bars GROUP BY interval ORDER BY interval"
+).fetchall()
+print("OHLCV counts:", rows)
+total = sum(row[1] for row in rows)
+conn.close()
+assert total > 0, "No OHLCV rows found in migrated database"
+print("TOTAL OHLCV:", total)
+'@
+
 Push-Location $RootDir
 try {
-    & $VenvPython -c "from dotenv import load_dotenv; load_dotenv('.env', override=True); import sqlite3; import backend.db as d; print('Resolved DB:', d.DB_PATH); c=sqlite3.connect(d.DB_PATH); rows=c.execute(\"SELECT interval, COUNT(*) FROM tb_ohlcv_bars GROUP BY interval ORDER BY interval\").fetchall(); print('OHLCV counts:', rows); total=sum(x[1] for x in rows); c.close(); assert total > 0, 'No OHLCV rows found in migrated database'; print('TOTAL OHLCV:', total)"
+    $VerificationPython | & $VenvPython -
     if ($LASTEXITCODE -ne 0) {
         throw "Verification failed. Do NOT delete the C-drive source."
     }
