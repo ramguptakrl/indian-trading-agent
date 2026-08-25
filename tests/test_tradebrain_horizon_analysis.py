@@ -34,11 +34,11 @@ class TradeBrainHorizonAnalysisTests(unittest.TestCase):
             self.assertNotIn("MTF disabled", source)
             self.assertNotIn("funded with the trader's own cash", source)
 
-    def test_run_horizon_pair_launches_two_independent_modes(self):
+    def test_run_horizon_pair_launches_two_independent_modes_with_serial_provider_load(self):
         calls = []
 
-        def fake_launch(req, mode):
-            calls.append(mode)
+        def fake_launch(req, mode, *, wait_for_task_id=None):
+            calls.append((mode, wait_for_task_id))
             return f"task-{mode.lower()}"
 
         with patch.object(analysis_horizons, "_launch", side_effect=fake_launch):
@@ -46,7 +46,10 @@ class TradeBrainHorizonAnalysisTests(unittest.TestCase):
                 HorizonAnalysisRequest(ticker="BSE", trade_date="2026-08-25")
             )
 
-        self.assertEqual(calls, ["INTRADAY", "SWING"])
+        self.assertEqual(
+            calls,
+            [("INTRADAY", None), ("SWING", "task-intraday")],
+        )
         self.assertEqual(
             result["tasks"],
             {"INTRADAY": "task-intraday", "SWING": "task-swing"},
@@ -54,6 +57,7 @@ class TradeBrainHorizonAnalysisTests(unittest.TestCase):
         self.assertTrue(result["independent_graph_runs"])
         self.assertFalse(result["shared_final_decision"])
         self.assertFalse(result["horizon_substitution_allowed"])
+        self.assertEqual(result["provider_load_scheduling"], "SERIALIZED_INDEPENDENT_HORIZONS")
         self.assertEqual(result["swing_funding"], "ZERODHA_MTF_ONLY")
         self.assertFalse(result["order_execution_allowed"])
 
