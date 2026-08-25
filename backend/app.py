@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.db import ensure_db
 from backend.routers import (
     analysis,
+    analysis_horizons,
     market_data,
     news as news_router,
     settings as settings_router,
@@ -101,6 +102,7 @@ app.add_middleware(
 # generic-simulation/calibration/shadow-trade/memory-admin APIs.
 app.include_router(market_data.router)
 app.include_router(analysis.router)
+app.include_router(analysis_horizons.router)
 app.include_router(settings_router.router)
 app.include_router(news_router.router)
 app.include_router(tradebrain_router.router)
@@ -129,6 +131,7 @@ def health():
         "legacy_ita_trade_discovery_routes_mounted": False,
         "trader_profile": "RESIDENT_INDIAN",
         "active_trade_modes": ["INTRADAY", "SWING"],
+        "independent_horizon_analysis": True,
         "swing_funding": "ZERODHA_MTF_ONLY",
         "mtf_enabled": True,
         "mtf_order_execution_enabled": False,
