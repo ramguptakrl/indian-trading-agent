@@ -22,6 +22,7 @@ from backend.routers import (
     tradebrain as tradebrain_router,
     tradebrain_actual_trades as tradebrain_actual_trades_router,
     tradebrain_evidence as tradebrain_evidence_router,
+    tradebrain_mtf_replay as tradebrain_mtf_replay_router,
     tradebrain_phase3 as tradebrain_phase3_router,
     tradebrain_phase4 as tradebrain_phase4_router,
     tradebrain_phase5 as tradebrain_phase5_router,
@@ -44,6 +45,7 @@ from backend.tradebrain.kite_stream import ensure_kite_live_schema
 from backend.tradebrain.market_data_store import ensure_market_data_schema
 from backend.tradebrain.market_source_policy import market_source_status
 from backend.tradebrain.mtf_paper_ledger import ensure_mtf_paper_schema
+from backend.tradebrain.mtf_replay import ensure_mtf_replay_schema
 from backend.tradebrain.paper_ledger import ensure_paper_ledger_schema
 from backend.tradebrain.prospective_gap import ensure_prospective_gap_schema
 from backend.tradebrain.regime_hardening import install_phase4_regime_hardening
@@ -62,6 +64,7 @@ async def lifespan(app: FastAPI):
     ensure_challenger_schema()
     ensure_paper_ledger_schema()
     ensure_mtf_paper_schema()
+    ensure_mtf_replay_schema()
     ensure_exchange_calendar_schema()
     ensure_advisory_schema()
     ensure_evidence_schema()
@@ -116,6 +119,7 @@ app.include_router(tradebrain_phase9_router.router)
 app.include_router(tradebrain_phase10_router.router)
 app.include_router(tradebrain_evidence_router.router)
 app.include_router(tradebrain_actual_trades_router.router)
+app.include_router(tradebrain_mtf_replay_router.router)
 
 
 @app.get("/api/health")
@@ -132,11 +136,15 @@ def health():
         "trader_profile": "RESIDENT_INDIAN",
         "active_trade_modes": ["INTRADAY", "SWING"],
         "independent_horizon_analysis": True,
+        "live_multitimeframe_decision_context": "1D_DERIVED4H_1H_15M_AUDITED_FAIL_CLOSED",
         "swing_funding": "ZERODHA_MTF_ONLY",
         "mtf_enabled": True,
         "mtf_order_execution_enabled": False,
+        "mtf_strict_replay_economics": True,
         "corporate_event_memory": True,
         "corporate_action_split_dividend_context": True,
+        "official_split_price_eras": True,
+        "dividend_creates_structural_price_era": False,
         "audited_market_data": True,
         "lookahead_safe_replay": True,
         "strict_replay_outcomes": True,
