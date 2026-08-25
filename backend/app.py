@@ -1,4 +1,4 @@
-"""FastAPI application for the Indian Market Trading Agent."""
+"""FastAPI application for Trade Brain — BSE Ltd."""
 
 import sys
 import os
@@ -48,6 +48,7 @@ from backend.tradebrain.prospective_gap import ensure_prospective_gap_schema
 from backend.tradebrain.kite_stream import ensure_kite_live_schema
 from backend.tradebrain.actual_trade_journal import ensure_actual_trade_schema
 from backend.tradebrain.market_source_policy import market_source_status
+from backend.tradebrain.bse_scope import public_scope
 
 
 @asynccontextmanager
@@ -73,8 +74,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Indian Market Trading Agent — Trade Brain Reframe",
-    description="Resident-Indian INTRADAY/SWING research with audited evidence, deterministic gating and execution disabled",
+    title="Trade Brain — BSE Ltd",
+    description=(
+        "BSE Ltd-only resident-Indian INTRADAY/SWING research with audited evidence, "
+        "deterministic gating, broader-market context and broker execution disabled"
+    ),
     version="0.12.1",
     lifespan=lifespan,
 )
@@ -87,6 +91,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Stage-1 BSE conversion keeps inherited routers mounted while the frontend is narrowed and
+# dependency usage is audited. Generic trade-discovery routes are no longer part of normal
+# product navigation and will be physically removed only after their BSE dependencies are
+# proven dead by CI. AnalysisRequest already enforces the BSE-only trade-target boundary.
 app.include_router(market_data.router)
 app.include_router(analysis.router)
 app.include_router(watchlist.router)
@@ -126,9 +134,13 @@ app.include_router(tradebrain_actual_trades_router.router)
 def health():
     return {
         "status": "ok",
-        "service": "indian-trading-agent",
+        "service": "trade-brain-bse",
         "tradebrain_reframe": True,
         "tradebrain_version": "0.12.1",
+        "product_scope": public_scope(),
+        "bse_only_trade_target": True,
+        "broader_market_role": "CONTEXT_ONLY",
+        "legacy_ita_routes_temporarily_mounted_during_conversion": True,
         "trader_profile": "RESIDENT_INDIAN",
         "active_trade_modes": ["INTRADAY", "SWING"],
         "mtf_enabled": False,
@@ -175,4 +187,6 @@ def get_config():
         "max_position_value", "max_loss_per_trade", "max_daily_loss",
         "max_open_positions",
     ]
-    return {k: DEFAULT_CONFIG.get(k) for k in safe_keys}
+    config = {k: DEFAULT_CONFIG.get(k) for k in safe_keys}
+    config["product_scope"] = public_scope()
+    return config
