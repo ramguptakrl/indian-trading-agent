@@ -16,6 +16,7 @@ on:
       - "backend/routers/tradebrain_phase10.py"
       - "backend/routers/tradebrain_evidence.py"
       - "backend/routers/analysis.py"
+      - "backend/routers/analysis_horizons.py"
       - "backend/routers/recommender.py"
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
@@ -67,6 +68,7 @@ on:
       - "backend/routers/tradebrain_phase10.py"
       - "backend/routers/tradebrain_evidence.py"
       - "backend/routers/analysis.py"
+      - "backend/routers/analysis_horizons.py"
       - "backend/routers/recommender.py"
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
@@ -113,6 +115,7 @@ jobs:
       - name: Install Trade Brain test dependencies
         run: >-
           python -m pip install
+          "fastapi>=0.115,<1"
           "pydantic>=2,<3"
           "requests>=2.32"
           "pypdf>=5,<7"
@@ -136,6 +139,7 @@ jobs:
           backend/routers/tradebrain_phase10.py
           backend/routers/tradebrain_evidence.py
           backend/routers/analysis.py
+          backend/routers/analysis_horizons.py
           backend/app.py
           scripts/tradebrain_phase2_smoke.py
           scripts/tradebrain_phase3_smoke.py
