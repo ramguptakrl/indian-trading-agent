@@ -13,6 +13,7 @@ def create_trader(llm, memory, requested_trade_mode: str | None = None):
         sentiment_report = state["sentiment_report"]
         news_report = state["news_report"]
         fundamentals_report = state["fundamentals_report"]
+        multi_timeframe_context = str(state.get("multi_timeframe_context") or "AUDITED MULTI-TIMEFRAME CONTEXT: unavailable")
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
         past_memories = memory.get_memories(curr_situation, n_matches=2)
@@ -27,7 +28,7 @@ def create_trader(llm, memory, requested_trade_mode: str | None = None):
         horizon_context = horizon_instruction(requested_trade_mode)
         context = {
             "role": "user",
-            "content": f"Based on a comprehensive analysis by a team of analysts, here is a research plan for {company_name}. {instrument_context} This plan incorporates current technical, macro, news, fundamentals, and sentiment evidence. Use it as evidence for a candidate trade plan; do not treat the research plan itself as permission to trade.\n\n{horizon_context}\n\nProposed Research Plan: {investment_plan}\n\nProduce a precise candidate for the dedicated horizon or say NO TRADE / WAIT when the evidence or geometry is inadequate.",
+            "content": f"Based on a comprehensive analysis by a team of analysts, here is a research plan for {company_name}. {instrument_context} This plan incorporates current technical, macro, news, fundamentals, and sentiment evidence. Use it as evidence for a candidate trade plan; do not treat the research plan itself as permission to trade.\n\n{horizon_context}\n\n**Deterministic audited D→4H→1H→15m evidence (same as final risk manager receives):**\n{multi_timeframe_context}\n\nProposed Research Plan: {investment_plan}\n\nProduce a precise candidate for the dedicated horizon or say NO TRADE / WAIT when the evidence or geometry is inadequate.",
         }
 
         messages = [
@@ -47,7 +48,8 @@ Do not propose active own-cash CNC SWING, averaging/rescue cycles, overnight SHO
 The modeled trader is RESIDENT_INDIAN. A broker/Kite credential may be used later only to supply historical candles or live quotes, even if that credential belongs to a different account type. Never infer NRI trading rules, NRI charges, NRI tax treatment, or order permission from a data credential.
 
 **Evidence philosophy**
-- The canonical technical hierarchy is 1D dominant trend/regime -> derived 4H structure -> 1H setup -> 15m entry refinement when audited values are supplied. Do not invent missing timeframe values.
+- The canonical technical hierarchy is 1D dominant trend/regime -> derived 4H structure -> 1H setup -> 15m entry refinement. The deterministic audited context supplied in the user message is authoritative for these frames.
+- If that context says `MISSING_AUDITED_SERIES`, `INCOMPLETE_TIMEFRAME_EVIDENCE`, or `PRICE_COMPARABILITY_BLOCK`, never fabricate missing values or downgrade the warning. Prefer WAIT / NO TRADE when the missing evidence is material to the requested horizon.
 - Indicator/heuristic scores are soft evidence, not guaranteed or learned probabilities.
 - Gap/candlestick/FVG concepts remain research evidence unless validated; known split/dividend ex-date moves must not be treated as ordinary gaps.
 - News/social commentary may inform a hypothesis; verified market/broker/exchange/corporate-action facts outrank narrative.
