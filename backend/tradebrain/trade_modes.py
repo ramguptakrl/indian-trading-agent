@@ -1,8 +1,11 @@
-"""Trade Brain active product-mode boundary.
+"""Trade Brain active product-mode and funding boundary.
 
-Phase 6 simplifies the product to two resident-Indian equity modes only:
-INTRADAY and SWING. Older DAY / SWING_POSITION values remain readable aliases so
-Phases 0-5 historical rows do not need destructive migration.
+Trade horizon and funding are deliberately separate dimensions:
+- INTRADAY: same-session cash-equity LONG/SHORT; no overnight short.
+- SWING: LONG-only; funding may be own-cash CNC or verified MTF.
+
+Older DAY / SWING_POSITION values remain readable aliases so historical rows do not
+need destructive migration.
 """
 
 from __future__ import annotations
@@ -11,8 +14,10 @@ from typing import Literal
 
 ActiveTradeMode = Literal["INTRADAY", "SWING"]
 CompatibleTradeMode = Literal["INTRADAY", "SWING", "DAY", "SWING_POSITION"]
+SwingFundingMode = Literal["CNC_OWN_CASH", "MTF"]
 
 ACTIVE_TRADE_MODES = ("INTRADAY", "SWING")
+SWING_FUNDING_MODES = ("CNC_OWN_CASH", "MTF")
 LEGACY_TO_ACTIVE = {
     "DAY": "INTRADAY",
     "SWING_POSITION": "SWING",
@@ -38,6 +43,13 @@ def to_legacy_mode(value: str) -> Literal["DAY", "SWING_POSITION"]:
     return ACTIVE_TO_LEGACY[active]  # type: ignore[return-value]
 
 
+def to_swing_funding(value: str) -> SwingFundingMode:
+    key = str(value).strip().upper()
+    if key not in SWING_FUNDING_MODES:
+        raise ValueError("Swing funding must be CNC_OWN_CASH or MTF")
+    return key  # type: ignore[return-value]
+
+
 def is_intraday(value: str) -> bool:
     return to_active_mode(value) == "INTRADAY"
 
@@ -50,8 +62,12 @@ def product_boundary() -> dict:
     return {
         "trader_profile": "RESIDENT_INDIAN",
         "active_trade_modes": list(ACTIVE_TRADE_MODES),
-        "mtf_enabled": False,
-        "funded_amount_modeled": False,
+        "swing_long_only": True,
+        "swing_funding_modes": list(SWING_FUNDING_MODES),
+        "mtf_enabled_for_research_and_cost_modeling": True,
+        "funded_amount_modeled": True,
+        "mtf_broker_order_execution_enabled": False,
         "derivatives_enabled": False,
+        "intraday_short_overnight_allowed": False,
         "legacy_db_aliases": {"DAY": "INTRADAY", "SWING_POSITION": "SWING"},
     }
