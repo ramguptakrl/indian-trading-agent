@@ -19,7 +19,7 @@ from backend.db import DB_PATH
 from backend.tradebrain.corporate_action_eras import sync_official_bse_split_price_eras
 from backend.tradebrain.focus_lab import evaluate_plan_replay_outcome
 from backend.tradebrain.focus_lab_store import get_plan
-from backend.tradebrain.market_data_store import get_series, query_bars
+from backend.tradebrain.market_data_store import get_series
 from backend.tradebrain.swing_mtf import calculate_swing_mtf_trade_costs
 from backend.tradebrain.trade_modes import to_active_mode
 
@@ -89,17 +89,29 @@ def _crosses_price_era(
     end: str | None,
     db_path: str | None,
 ) -> tuple[bool, list[str]]:
+    """Check bar-open era IDs, including the exit/boundary bar itself.
+
+    The strict replay may timestamp a threshold exit at the bar open. Using the generic
+    completed-bar `as_of` query here would exclude that very bar. Direct `ts_open`
+    bounds ensure a split ex-date bar cannot sneak through as a real stop/target event.
+    """
     if not start or not end:
         return False, []
-    bars = query_bars(
-        series_id,
-        interval,
-        start=_parse(start).isoformat(),
-        as_of=_parse(end).isoformat(),
-        limit=500000,
-        db_path=db_path,
-    )
-    eras = sorted({str(bar.get("era_id")) for bar in bars if bar.get("era_id")})
+    start_utc = _parse(start).isoformat()
+    end_utc = _parse(end).isoformat()
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT era_id
+            FROM tb_ohlcv_bars
+            WHERE series_id=? AND interval=?
+              AND ts_open>=? AND ts_open<=?
+              AND era_id IS NOT NULL AND era_id!=''
+            ORDER BY era_id
+            """,
+            (series_id, interval, start_utc, end_utc),
+        ).fetchall()
+    eras = [str(row["era_id"]) for row in rows]
     return len(eras) > 1, eras
 
 
@@ -182,7 +194,6 @@ def evaluate_swing_mtf_replay(
     if str(series.get("exchange") or "").upper() != "NSE" or str(series.get("symbol") or "").upper() != "BSE":
         raise ValueError("Active SWING MTF replay supports only canonical NSE:BSE")
 
-    # Synchronize only split events known by this replay cutoff. Raw OHLC remains intact.
     era_sync = sync_official_bse_split_price_eras(
         series_id,
         known_by=as_of or datetime.now(timezone.utc),
