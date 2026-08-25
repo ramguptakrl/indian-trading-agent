@@ -107,3 +107,33 @@ Interpretation:
 - Gemini is now the default intelligence provider and Groq is available as an alternate.
 - Provider credentials remain local and do not alter Trade Brain's advisory-only or
   Kite MARKET_DATA_ONLY safety boundaries.
+
+2026-08-25 — After-market Phase-1 identity bootstrap correction
+---------------------------------------------------------------
+STATUS: PASSED
+
+Observed failure:
+- A fresh local After Market Study process repeatedly stopped safely with
+  "Unknown NSE:BSE; refresh Phase 1 security master before creating audited market data."
+- The Phase-3 market-data store was correctly enforcing its identity boundary; the bug was
+  that the scheduler attempted Kite history before bootstrapping the local Phase-1 store.
+
+Correction:
+- The study cycle now checks the exact NSE:BSE listing before historical ingestion.
+- If the listing already exists, no security-master refresh is performed.
+- If it is missing, the official NSE equity security master is refreshed and NSE:BSE is
+  verified before Kite history can create an audited market series.
+- If the official refresh still does not resolve NSE:BSE, the study cycle fails closed.
+- Kite instrument identity is not used to bypass or invent Phase-1 identity.
+
+Validation:
+- Added regression coverage for existing identity reuse, one-time bootstrap when missing,
+  fail-closed behavior, and successful study continuation after identity verification.
+- Foundation CI run 32872123546 passed unit tests, frontend contract build, and all Phase
+  2 through Phase 10 observational smokes.
+
+Interpretation:
+- Fresh installations can now self-bootstrap the required NSE:BSE identity during the
+  automatic study cycle without a manual Phase-1 refresh step.
+- This changes bootstrap orchestration only. Advisory-only, Kite MARKET_DATA_ONLY, and
+  no-broker-order safety boundaries remain unchanged.
