@@ -1,11 +1,11 @@
-"""API for manually recording actual broker trades after Trade Brain advisories."""
+"""API for manually recording actual BSE Ltd broker trades after Trade Brain advisories."""
 
 from __future__ import annotations
 
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.tradebrain.actual_trade_journal import (
     actual_trade_stats,
@@ -15,13 +15,14 @@ from backend.tradebrain.actual_trade_journal import (
     mark_actual_trade,
     record_actual_trade,
 )
+from backend.tradebrain.bse_scope import BSE_SCOPE, require_bse_trade_target
 
 router = APIRouter(prefix="/api/tradebrain/actual-trades", tags=["tradebrain-actual-trades"])
 
 
 class ActualTradeCreate(BaseModel):
-    ticker: str = Field(min_length=1, max_length=40)
-    exchange: Literal["NSE", "BSE"] = "NSE"
+    ticker: str = "BSE"
+    exchange: Literal["NSE"] = "NSE"
     mode: Literal["INTRADAY", "SWING"]
     direction: Literal["LONG", "SHORT"]
     quantity: int = Field(gt=0)
@@ -32,6 +33,11 @@ class ActualTradeCreate(BaseModel):
     take_profit: float | None = Field(default=None, gt=0)
     broker_order_ref: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("ticker", mode="before")
+    @classmethod
+    def enforce_bse_ticker(cls, value: str) -> str:
+        return require_bse_trade_target(value)
 
 
 class ActualTradeClose(BaseModel):
@@ -59,7 +65,9 @@ def _call(fn, *args, **kwargs):
 def doctrine():
     return {
         "observation_kind": "ACTUAL_MANUAL_TRADE",
-        "purpose": "Record what the human actually did after an advisory; keep it separate from replay and paper outcomes.",
+        "purpose": "Record what the human actually did in BSE Ltd after an advisory; keep it separate from replay and paper outcomes.",
+        "instrument": BSE_SCOPE.kite_symbol,
+        "isin": BSE_SCOPE.isin,
         "supports": ["INTRADAY", "SWING", "PARTIAL_CLOSE", "ADVISORY_LINK", "MANUAL_BROKER_REFERENCE"],
         "charges": "Resident equity charges are estimated unless a user supplies an actual charge override for a closed slice.",
         "broker_order_execution": False,
