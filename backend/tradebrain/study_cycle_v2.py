@@ -7,6 +7,7 @@ V2 preserves the tested V1 daily/5m bootstrap/replay/prospective cycle, then add
 - research-only candlestick/FVG studies
 - research-only Fibonacci and candle-volume-at-price proxy features
 - point-in-time BSE/India news memory from first observation forward
+- audited Kite NIFTY 50 daily context for broader-market correction awareness
 
 Nothing in this module can modify hard policy, promote a soft parameter automatically,
 or place/modify/cancel a broker order.
@@ -23,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 from backend.tradebrain.api_governor import KITE_API_GOVERNOR
 from backend.tradebrain.audit_txt import audit_learning
+from backend.tradebrain.context_index import nifty50_correction_context, sync_kite_nifty50_daily
 from backend.tradebrain.kite_data import KiteDataOnlyClient
 from backend.tradebrain.kite_history_range import sync_kite_history_range
 from backend.tradebrain.multi_timeframe import multi_timeframe_snapshot
@@ -186,6 +188,7 @@ def run_after_market_study_v2(
     bootstrap = not bool(state.get("bootstrap_completed"))
     days_15m = bootstrap_15m_days if bootstrap else incremental_days
     days_60m = bootstrap_60m_days if bootstrap else incremental_days
+    days_nifty = bootstrap_daily_days if bootstrap else incremental_days
     client = KiteDataOnlyClient(api_key=api_key, access_token=access_token)
 
     try:
@@ -205,6 +208,14 @@ def run_after_market_study_v2(
         if not series_id:
             raise ValueError("V2 study could not resolve the audited NSE:BSE market series")
 
+        nifty_sync = _safe_research(
+            sync_kite_nifty50_daily,
+            from_time=current - timedelta(days=days_nifty),
+            to_time=current,
+            client=client,
+            db_path=db_path,
+        )
+
         as_of = current.isoformat()
         mtf = _safe_research(multi_timeframe_snapshot, series_id, as_of=as_of, db_path=db_path)
         patterns_15m = _safe_research(pattern_lab_study, series_id, as_of=as_of, db_path=db_path, interval="15m")
@@ -216,6 +227,7 @@ def run_after_market_study_v2(
             observed_at=current,
             db_path=db_path,
         )
+        broader_market = _safe_research(nifty50_correction_context, as_of=current, db_path=db_path)
 
         named_research = (
             ("multi_timeframe", mtf),
@@ -223,8 +235,12 @@ def run_after_market_study_v2(
             ("patterns_daily", patterns_daily),
             ("structure_lab", structure),
             ("news_memory", news_memory),
+            ("nifty50_context_sync", nifty_sync),
+            ("broader_market_context", broader_market),
         )
         warnings = [name for name, item in named_research if item.get("status") != "SUCCESS"]
+        if broader_market.get("status") == "SUCCESS" and (broader_market.get("result") or {}).get("status") != "AUDITED_NIFTY_DAILY_CONTEXT":
+            warnings.append("broader_market_context_incomplete")
         final_status = "SUCCESS" if not warnings else "SUCCESS_WITH_RESEARCH_WARNINGS"
         result = {
             "status": final_status,
@@ -242,13 +258,15 @@ def run_after_market_study_v2(
             "history": {
                 "fifteen_minute": _history_summary(history_15m),
                 "sixty_minute": _history_summary(history_60m),
+                "nifty50_daily": nifty_sync,
             },
             "multi_timeframe": mtf,
             "pattern_lab_15m": patterns_15m,
             "pattern_lab_daily": patterns_daily,
             "structure_lab": structure,
             "news_memory": news_memory,
-            "research_warnings": warnings,
+            "broader_market_context": broader_market,
+            "research_warnings": sorted(set(warnings)),
             "api_governor": KITE_API_GOVERNOR.snapshot(),
             "learning_boundary": {
                 "llm_weights_modified": False,
@@ -267,7 +285,8 @@ def run_after_market_study_v2(
             interpretation=(
                 "V2 preserved the V1 replay/prospective study and added audited 15m/60m history, "
                 "D-4H-1H-15m context, candlestick/FVG research, Fibonacci/candle-volume structure "
-                "research, and point-in-time news memory. No live policy or broker authority changed."
+                "research, point-in-time news memory, and context-only audited Kite NIFTY 50 daily "
+                "evidence. No live policy or broker authority changed."
             ),
         )
         result["audit_txt"] = audit_path
