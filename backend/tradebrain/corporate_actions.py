@@ -9,7 +9,7 @@ corporate-action price moves from being treated as ordinary gaps or freak ticks.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Iterable
 
 METHOD_VERSION = "BSE_CORPORATE_ACTION_CONTEXT_V1"
@@ -48,6 +48,18 @@ def _parse_date_token(raw: str | None) -> str | None:
         except ValueError:
             continue
     return None
+
+
+def _as_utc(value: str | datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _labelled_date(text: str, labels: tuple[str, ...]) -> str | None:
@@ -90,8 +102,6 @@ def _dividend_amount(text: str) -> tuple[float | None, float | None]:
 
 
 def _split_terms(text: str) -> dict[str, Any]:
-    # Prefer explicit face-value conversion because it is much less ambiguous than a
-    # bare "1:5" ratio in free-form announcements.
     face = re.search(
         r"face\s+value\s+(?:of\s+)?(?:₹|rs\.?|inr)?\s*([0-9]+(?:\.[0-9]+)?)"
         r".{0,160}?(?:into|to)\s+(?:equity\s+shares?.{0,80}?)?face\s+value\s+(?:of\s+)?(?:₹|rs\.?|inr)?\s*([0-9]+(?:\.[0-9]+)?)",
@@ -146,12 +156,14 @@ def normalize_corporate_action(event: dict[str, Any]) -> dict[str, Any] | None:
     ex_date = _labelled_date(text, (r"ex[ -]?date", r"ex[ -]?dividend\s+date", r"ex[ -]?split\s+date"))
     record_date = _labelled_date(text, (r"record\s+date",))
     payment_date = _labelled_date(text, (r"payment\s+date", r"dividend\s+payment\s+date"))
+    known_at = event.get("fetched_at") or event.get("announced_at")
 
     result: dict[str, Any] = {
         "method_version": METHOD_VERSION,
         "event_id": event.get("event_id"),
         "action_type": action_type,
         "announced_at": event.get("announced_at"),
+        "first_known_at": known_at,
         "ex_date": ex_date,
         "record_date": record_date,
         "payment_date": payment_date,
@@ -186,14 +198,32 @@ def corporate_action_context(
     events: Iterable[dict[str, Any]],
     *,
     session_date: str | date,
+    known_by: str | datetime | None = None,
 ) -> dict[str, Any]:
-    """Return price-comparability context for one market date.
+    """Return point-in-time price-comparability context for one market date.
 
-    Unknown/missing ex-dates never become guessed matches. A record date by itself is
-    preserved for awareness but is not silently treated as the ex-date.
+    Unknown/missing ex-dates never become guessed matches. For historical/replay use,
+    `known_by` excludes announcements that were not yet observed by that cutoff.
     """
     day = date.fromisoformat(session_date) if isinstance(session_date, str) else session_date
-    actions = [item for event in events if (item := normalize_corporate_action(event)) is not None]
+    cutoff = _as_utc(known_by)
+    normalized = [item for event in events if (item := normalize_corporate_action(event)) is not None]
+    actions: list[dict[str, Any]] = []
+    excluded_future_knowledge = 0
+    excluded_unknown_knowledge_time = 0
+    for item in normalized:
+        if cutoff is None:
+            actions.append(item)
+            continue
+        first_known = _as_utc(item.get("first_known_at"))
+        if first_known is None:
+            excluded_unknown_knowledge_time += 1
+            continue
+        if first_known <= cutoff:
+            actions.append(item)
+        else:
+            excluded_future_knowledge += 1
+
     ex_actions = [item for item in actions if item.get("ex_date") == day.isoformat()]
     record_actions = [item for item in actions if item.get("record_date") == day.isoformat()]
     split = any(item["action_type"] == "STOCK_SPLIT" for item in ex_actions)
@@ -201,6 +231,7 @@ def corporate_action_context(
     return {
         "method_version": METHOD_VERSION,
         "session_date": day.isoformat(),
+        "known_by": cutoff.isoformat() if cutoff else None,
         "actions": actions,
         "ex_date_actions": ex_actions,
         "record_date_actions": record_actions,
@@ -211,7 +242,23 @@ def corporate_action_context(
         "raw_overnight_gap_comparable": not bool(ex_actions),
         "raw_price_series_structural_break": split,
         "requires_adjusted_or_event_aware_return_logic": bool(ex_actions),
+        "future_knowledge_excluded": excluded_future_knowledge,
+        "unknown_knowledge_time_excluded": excluded_unknown_knowledge_time,
         "unknown_ex_date_is_not_guessed": True,
         "trade_authorization": False,
         "order_execution_allowed": False,
     }
+
+
+def corporate_action_context_from_store(
+    *,
+    session_date: str | date,
+    known_by: str | datetime | None = None,
+    db_path: str | None = None,
+    limit: int = 500,
+) -> dict[str, Any]:
+    """Build BSE action context from the official event memory already in Trade Brain."""
+    from backend.tradebrain.corporate_event_store import list_events
+
+    events = list_events(limit=max(1, min(int(limit), 500)), db_path=db_path)
+    return corporate_action_context(events, session_date=session_date, known_by=known_by)
