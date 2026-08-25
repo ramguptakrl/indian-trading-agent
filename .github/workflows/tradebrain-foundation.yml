@@ -41,6 +41,7 @@ on:
       - "scripts/tradebrain_phase10_smoke.py"
       - "scripts/tradebrain_bse_evidence_baseline.py"
       - "scripts/tradebrain_kite_live_stream.py"
+      - "scripts/tradebrain_kite_auth.py"
       - "scripts/tradebrain_test_interpretation.py"
       - "start.sh"
       - "pyproject.toml"
@@ -91,6 +92,7 @@ on:
       - "scripts/tradebrain_phase10_smoke.py"
       - "scripts/tradebrain_bse_evidence_baseline.py"
       - "scripts/tradebrain_kite_live_stream.py"
+      - "scripts/tradebrain_kite_auth.py"
       - "scripts/tradebrain_test_interpretation.py"
       - "start.sh"
       - "pyproject.toml"
@@ -143,6 +145,7 @@ jobs:
           scripts/tradebrain_phase10_smoke.py
           scripts/tradebrain_bse_evidence_baseline.py
           scripts/tradebrain_kite_live_stream.py
+          scripts/tradebrain_kite_auth.py
           scripts/tradebrain_test_interpretation.py
           tradingagents/dataflows/interface.py
           tradingagents/dataflows/tradebrain_market.py
