@@ -18,6 +18,11 @@ from backend.ws import manager
 from backend.db import save_analysis, get_analysis, get_analysis_history, update_analysis_pnl
 from backend.tradebrain.advisory_pipeline import evaluate_final_advisory, parse_agent_candidate
 from backend.tradebrain.advisory_store import get_final_advisory, save_final_advisory
+from backend.tradebrain.llm_failover import (
+    get_capacity_fallback_config,
+    is_retryable_llm_capacity_error,
+    public_capacity_error,
+)
 from pydantic import BaseModel as PydanticBaseModel
 from tradingagents.utils.ticker import normalize_ticker
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -83,22 +88,25 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
     _tasks[task_id]["status"] = "running"
     stats = StatsCallback()
 
-    try:
+    def execute_graph(current_config: dict):
+        """Execute one provider attempt and stream progress to the existing task."""
         ta = TradingAgentsGraph(
             selected_analysts=selected_analysts,
             debug=False,
-            config=config,
+            config=current_config,
             callbacks=[stats],
         )
 
-        propagator = Propagator(max_recur_limit=config.get("max_recur_limit", 100))
+        propagator = Propagator(max_recur_limit=current_config.get("max_recur_limit", 100))
         init_state = propagator.create_initial_state(ticker, trade_date)
         stream_args = propagator.get_graph_args()
 
         prev_reports = {}
         chunk_count = 0
+        final_chunk = None
 
         for chunk in ta.graph.stream(init_state, **stream_args):
+            final_chunk = chunk
             chunk_count += 1
             last_message = ""
             if chunk.get("messages"):
@@ -164,14 +172,63 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
                             "type": "risk_debate", "side": side, "content": val,
                         }))
 
-        final_state = chunk
+        if final_chunk is None:
+            raise RuntimeError("Analysis graph completed without producing a state")
+        return ta, final_chunk
+
+    try:
+        active_config = dict(config)
+        failover_used = False
+
+        try:
+            ta, final_state = execute_graph(active_config)
+        except Exception as primary_error:
+            if not is_retryable_llm_capacity_error(primary_error):
+                raise
+
+            fallback_config = get_capacity_fallback_config(active_config)
+            if fallback_config is None:
+                raise RuntimeError(
+                    public_capacity_error(primary_error, fallback_available=False)
+                ) from primary_error
+
+            failover_used = True
+            primary_provider = str(active_config.get("llm_provider") or "google")
+            fallback_provider = str(fallback_config.get("llm_provider") or "groq")
+            message = (
+                f"{primary_provider.title()} quota/rate limit reached — automatically "
+                f"switching this analysis to {fallback_provider.title()}..."
+            )
+            print(f"[Analysis {task_id}] {message}", flush=True)
+            loop.run_until_complete(manager.send_event(task_id, {
+                "type": "heartbeat",
+                "chunk": 0,
+                "last_activity": message,
+                "provider_failover": True,
+                "from_provider": primary_provider,
+                "to_provider": fallback_provider,
+            }))
+
+            active_config = fallback_config
+            try:
+                ta, final_state = execute_graph(active_config)
+            except Exception as fallback_error:
+                if is_retryable_llm_capacity_error(fallback_error):
+                    raise RuntimeError(
+                        public_capacity_error(fallback_error, fallback_available=True)
+                    ) from fallback_error
+                raise RuntimeError(
+                    f"Automatic Groq fallback could not complete the analysis: {str(fallback_error)[:500]}"
+                ) from fallback_error
+
         final_text = final_state.get("final_trade_decision", "")
         research_label = ta.process_signal(final_text)
-        exchange = str(config.get("default_exchange") or "NSE").upper()
+        exchange = str(active_config.get("default_exchange") or "NSE").upper()
         tradebrain_advisory = _analysis_advisory(ticker, trade_date, exchange, final_text)
 
         duration = time.time() - start_time
         stats_summary = stats.summary()
+        active_provider = str(active_config.get("llm_provider") or "unknown").lower()
 
         # Keep the legacy event type for frontend compatibility, but the value is now a
         # non-authorizing research label and the explicit safety metadata travels with it.
@@ -183,6 +240,8 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
             "trade_authorization": False,
             "requires_tradebrain_gate": True,
             "tradebrain_advisory": tradebrain_advisory,
+            "llm_provider": active_provider,
+            "llm_failover_used": failover_used,
         }))
         loop.run_until_complete(manager.send_event(task_id, {
             "type": "stats", **stats_summary,
@@ -192,6 +251,8 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
             "duration_seconds": round(duration, 1),
             "stats": stats_summary,
             "trade_authorization": False,
+            "llm_provider": active_provider,
+            "llm_failover_used": failover_used,
         }))
 
         invest_state = final_state.get("investment_debate_state", {})
@@ -206,6 +267,8 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
             "order_execution_allowed": False,
             "requires_tradebrain_gate": True,
             "tradebrain_advisory": tradebrain_advisory,
+            "llm_provider": active_provider,
+            "llm_failover_used": failover_used,
             "market_report": final_state.get("market_report"),
             "sentiment_report": final_state.get("sentiment_report"),
             "news_report": final_state.get("news_report"),
@@ -228,10 +291,16 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
         _tasks[task_id]["result"] = result_data
 
     except Exception as e:
+        message = str(e)
+        if is_retryable_llm_capacity_error(e):
+            message = public_capacity_error(
+                e,
+                fallback_available=get_capacity_fallback_config(config) is not None,
+            )
         _tasks[task_id]["status"] = "error"
-        _tasks[task_id]["error"] = str(e)
+        _tasks[task_id]["error"] = message
         loop.run_until_complete(manager.send_event(task_id, {
-            "type": "error", "message": str(e),
+            "type": "error", "message": message,
         }))
     finally:
         loop.close()
