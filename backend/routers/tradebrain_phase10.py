@@ -7,9 +7,10 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from backend.tradebrain.advisory_pipeline import evaluate_final_advisory, parse_agent_candidate
+from backend.tradebrain.advisory_pipeline import parse_agent_candidate
 from backend.tradebrain.advisory_store import get_final_advisory
 from backend.tradebrain.audit_txt import audit_final_advisory
+from backend.tradebrain.live_advisory import evaluate_live_guarded_advisory
 
 router = APIRouter(prefix="/api/tradebrain", tags=["tradebrain-phase10"])
 
@@ -33,6 +34,18 @@ class FinalAdvisoryRequest(BaseModel):
     funded_amount: float | None = Field(default=None, ge=0)
     mtf_interest_days: int | None = Field(default=None, ge=0)
 
+    # Live BSE market/data guard inputs. Missing critical range state fails closed.
+    last_price: float | None = Field(default=None, gt=0)
+    lower_limit: float | None = Field(default=None, gt=0)
+    upper_limit: float | None = Field(default=None, gt=0)
+    previous_accepted_price: float | None = Field(default=None, gt=0)
+    best_bid: float | None = Field(default=None, gt=0)
+    best_ask: float | None = Field(default=None, gt=0)
+    atr_reference: float | None = Field(default=None, gt=0)
+    halt_confirmed: bool = False
+    index_move_pct: float | None = None
+    official_halt_state: str | None = Field(default=None, max_length=200)
+
 
 @router.get("/phase10/doctrine")
 def phase10_doctrine():
@@ -42,6 +55,8 @@ def phase10_doctrine():
         "final_pipeline": [
             "STRICT_STRUCTURED_AI_CANDIDATE_PARSE",
             "VERIFIED_EXCHANGE_CALENDAR",
+            "LIVE_MARKET_HALT_AND_PRICE_RANGE_GUARDS",
+            "FREAK_TICK_DATA_CONFIRMATION",
             "EXPLICIT_CRASH_GUARD_STATE",
             "EXPLICIT_BROKER_EXCHANGE_PERMISSION",
             "DETERMINISTIC_HARD_RULE_GATE",
@@ -50,6 +65,8 @@ def phase10_doctrine():
             "RESIDENT_PLUS_MTF_NET_COST_SCENARIOS",
             "ADVISORY_ONLY_OUTPUT",
         ],
+        "live_guard_priority": "HALT > PRICE RANGE > DATA QUALITY/FREAK TICK > BROKER/FUNDING > TECHNICAL SETUP > LLM",
+        "missing_critical_market_state_fails_closed": True,
         "free_form_trade_inference": False,
         "raw_buy_sell_signal_output": False,
         "trade_authorization": False,
@@ -73,7 +90,14 @@ def phase10_parse_candidate(data: CandidateParseRequest):
 @router.post("/phase10/final-advisory")
 def phase10_final_advisory(data: FinalAdvisoryRequest):
     try:
-        result = evaluate_final_advisory(**data.model_dump())
+        payload = data.model_dump()
+        market_keys = {
+            "last_price", "lower_limit", "upper_limit", "previous_accepted_price",
+            "best_bid", "best_ask", "atr_reference", "halt_confirmed",
+            "index_move_pct", "official_halt_state",
+        }
+        market_inputs = {key: payload.pop(key) for key in market_keys}
+        result = evaluate_live_guarded_advisory(**payload, **market_inputs)
         request_audit = data.model_dump(exclude={"final_trade_decision"})
         audit_final_advisory(result, request=request_audit)
         return result
@@ -99,6 +123,11 @@ def phase10_acceptance_boundary():
         "mtf_eligibility_must_be_verified": True,
         "funded_amount_required_for_swing_pass": True,
         "mtf_interest_days_required_for_net_cost_swing_pass": True,
+        "live_price_required_for_live_pass": True,
+        "broker_price_range_required_for_live_pass": True,
+        "freak_tick_confirmation_required_before_live_pass": True,
+        "confirmed_halt_blocks_live_pass": True,
+        "potential_market_wide_circuit_requires_confirmation": True,
         "nri_kite_credential_role": "MARKET_DATA_ONLY",
         "order_execution_enabled": False,
         "raw_agent_buy_sell_is_trade_permission": False,
