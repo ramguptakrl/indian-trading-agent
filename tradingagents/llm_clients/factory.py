@@ -6,9 +6,11 @@ from .anthropic_client import AnthropicClient
 from .google_client import GoogleClient
 from .azure_client import AzureOpenAIClient
 
-# Providers that use the OpenAI-compatible chat completions API
+# Providers that use the OpenAI-compatible chat completions API.
+# Groq exposes an OpenAI-compatible endpoint, so it does not require a separate
+# SDK inside Trade Brain.
 _OPENAI_COMPATIBLE = (
-    "openai", "xai", "deepseek", "qwen", "glm", "ollama", "openrouter",
+    "openai", "xai", "deepseek", "qwen", "glm", "groq", "ollama", "openrouter",
 )
 
 
