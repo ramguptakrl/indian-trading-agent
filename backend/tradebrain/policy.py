@@ -47,8 +47,6 @@ class TradePlan(BaseModel):
     broker_allows_trade: bool = True
     evidence: list[str] = Field(default_factory=list)
     evaluated_at_ist: datetime | None = None
-    # SWING funding is deliberately explicit. Old/historical plans may omit it; such a
-    # current SWING candidate remains WAIT until funding/economics are reviewed.
     swing_funding: SwingFunding | None = None
     mtf_eligible_verified: bool | None = None
     funded_amount: float | None = Field(default=None, ge=0)
@@ -123,7 +121,9 @@ def evaluate_trade_plan(plan: TradePlan, *, db_path: str | None = None) -> GateR
             failures.append("SHORT requires take_profit < entry < stop_loss")
 
     if active_mode == "SWING" and plan.direction == "SHORT":
-        failures.append("SWING short is not allowed; active SWING mode is LONG-only equity")
+        # Keep the legacy phrase because historical audit/tests use SWING_POSITION as
+        # the persisted alias; the active product name remains SWING.
+        failures.append("SWING_POSITION short is not allowed; active SWING mode is LONG-only equity")
 
     if not plan.broker_allows_trade:
         failures.append("Broker/exchange rule does not allow this trade")
