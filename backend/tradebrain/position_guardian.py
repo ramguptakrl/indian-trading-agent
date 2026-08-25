@@ -2,7 +2,7 @@
 
 The guardian never places/modifies/cancels broker orders. It keeps a human-reported
 position under Trade Brain review until the journal is explicitly closed and ensures
-hard intraday timing/data-integrity constraints outrank AI opinion.
+hard intraday timing/data-integrity/corporate-action constraints outrank AI opinion.
 """
 
 from __future__ import annotations
@@ -12,12 +12,13 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.tradebrain.actual_trade_journal import list_actual_trades, mark_actual_trade
+from backend.tradebrain.guardian_context import build_guardian_context
 from backend.tradebrain.kite_stream import latest_kite_quote
 from backend.tradebrain.market_guards import combined_market_guard
 
 IST = ZoneInfo("Asia/Kolkata")
 INTRADAY_HARD_EXIT = time(15, 15)
-METHOD_VERSION = "BSE_POSITION_GUARDIAN_V1"
+METHOD_VERSION = "BSE_POSITION_GUARDIAN_V2_AUTO_CONTEXT"
 
 
 def _dt(value: str | datetime) -> datetime:
@@ -39,6 +40,7 @@ def assess_open_trade_risk(
     market_guard: dict[str, Any] | None = None,
     event_risk: str = "UNKNOWN",
     correction_state: str = "UNKNOWN",
+    corporate_action_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if current_price <= 0:
         raise ValueError("current_price must be positive")
@@ -60,6 +62,7 @@ def assess_open_trade_risk(
     target = float(trade["take_profit"]) if trade.get("take_profit") is not None else None
     entry_at = _dt(str(trade["entry_timestamp"])).astimezone(IST)
     guard = market_guard or {}
+    action = corporate_action_context or {}
 
     if mode == "INTRADAY":
         clock = now.time().replace(tzinfo=None)
@@ -89,6 +92,34 @@ def assess_open_trade_risk(
             "state": "DATA_CONFIRMATION_REQUIRED",
             "priority": "HIGH",
             "reason": "A suspicious/freak tick must be confirmed before changing the position thesis",
+            "evaluated_at_ist": now.isoformat(),
+            "trade_authorization": False,
+            "order_execution_allowed": False,
+        }
+
+    if action.get("stock_split_ex_date"):
+        return {
+            "state": "CORPORATE_ACTION_POSITION_RECONCILIATION_REQUIRED",
+            "priority": "CRITICAL",
+            "reason": (
+                "Known stock-split ex-date: raw quantity, entry, stop and target must be reconciled to the split-adjusted broker position before P&L or stop logic is trusted."
+            ),
+            "corporate_action_context": action,
+            "current_price": current_price,
+            "evaluated_at_ist": now.isoformat(),
+            "trade_authorization": False,
+            "order_execution_allowed": False,
+        }
+
+    if action.get("dividend_ex_date"):
+        return {
+            "state": "DIVIDEND_EX_DATE_ECONOMIC_REVIEW",
+            "priority": "HIGH",
+            "reason": (
+                "Known dividend ex-date: the mechanical price adjustment and dividend entitlement must be included before interpreting the move as an ordinary stop/gap event."
+            ),
+            "corporate_action_context": action,
+            "current_price": current_price,
             "evaluated_at_ist": now.isoformat(),
             "trade_authorization": False,
             "order_execution_allowed": False,
@@ -144,7 +175,7 @@ def assess_open_trade_risk(
         return {
             "state": "EARLY_EXIT_REVIEW",
             "priority": "HIGH",
-            "reason": "Long position is adverse while a severe market-correction condition is active",
+            "reason": "Long position is adverse while a severe audited correction condition is active",
             "correction_state": correction,
             "current_price": current_price,
             "evaluated_at_ist": now.isoformat(),
@@ -155,7 +186,7 @@ def assess_open_trade_risk(
     return {
         "state": "HOLD",
         "priority": "NORMAL",
-        "reason": "No hard exit, stop breach, confirmed halt, suspect data or supplied high-impact risk condition",
+        "reason": "No hard exit, stop breach, confirmed halt, suspect data, corporate-action reconciliation issue, or high-impact local risk condition",
         "event_risk": event,
         "correction_state": correction,
         "current_price": current_price,
@@ -169,13 +200,18 @@ def position_guardian_snapshot(
     *,
     evaluated_at: str | datetime | None = None,
     db_path: str | None = None,
-    event_risk: str = "UNKNOWN",
-    correction_state: str = "UNKNOWN",
+    event_risk: str | None = None,
+    correction_state: str | None = None,
 ) -> dict[str, Any]:
-    """Mark every open/partial BSE trade against the latest accepted Kite quote."""
+    """Mark open BSE trades against Kite plus automatic point-in-time local risk context."""
     open_trades = list_actual_trades(status="OPEN", limit=1000, db_path=db_path)
     partial = list_actual_trades(status="PARTIALLY_CLOSED", limit=1000, db_path=db_path)
     trades = [item for item in [*open_trades, *partial] if str(item.get("ticker") or "").upper() == "BSE"]
+    context = build_guardian_context(evaluated_at=evaluated_at, db_path=db_path)
+    resolved_event_risk = str(event_risk or context.get("event_risk") or "UNKNOWN").upper()
+    resolved_correction = str(correction_state or context.get("correction_state") or "UNKNOWN").upper()
+    action_context = context.get("corporate_action_context") or {}
+
     quote = latest_kite_quote("NSE", "BSE", db_path=db_path)
     if not quote:
         return {
@@ -184,6 +220,9 @@ def position_guardian_snapshot(
             "open_trades": len(trades),
             "positions": [],
             "reason": "No locally persisted Kite BSE quote is available",
+            "guardian_context": context,
+            "event_risk": resolved_event_risk,
+            "correction_state": resolved_correction,
             "trade_authorization": False,
             "order_execution_allowed": False,
         }
@@ -200,19 +239,30 @@ def position_guardian_snapshot(
 
     positions = []
     for trade in trades:
-        mark = mark_actual_trade(
-            trade_id=str(trade["trade_id"]),
-            current_price=current,
-            source=str(quote.get("source_key") or "ZERODHA_KITE_WEBSOCKET_MARKET_DATA_ONLY"),
-            db_path=db_path,
-        )
+        if action_context.get("stock_split_ex_date"):
+            mark = {
+                "status": "SKIPPED_CORPORATE_ACTION_RECONCILIATION",
+                "trade_id": str(trade["trade_id"]),
+                "current_price": current,
+                "reason": "Raw split-day mark would misstate quantity/cost basis before broker-position reconciliation.",
+                "trade_authorization": False,
+                "order_execution_allowed": False,
+            }
+        else:
+            mark = mark_actual_trade(
+                trade_id=str(trade["trade_id"]),
+                current_price=current,
+                source=str(quote.get("source_key") or "ZERODHA_KITE_WEBSOCKET_MARKET_DATA_ONLY"),
+                db_path=db_path,
+            )
         risk = assess_open_trade_risk(
             trade,
             current_price=current,
             evaluated_at=evaluated_at,
             market_guard=guard,
-            event_risk=event_risk,
-            correction_state=correction_state,
+            event_risk=resolved_event_risk,
+            correction_state=resolved_correction,
+            corporate_action_context=action_context,
         )
         positions.append({"trade": trade, "mark": mark, "risk": risk})
 
@@ -222,11 +272,16 @@ def position_guardian_snapshot(
         "quote_received_at": quote.get("received_at"),
         "current_price": current,
         "market_guard": guard,
+        "guardian_context": context,
         "open_trades": len(positions),
         "positions": positions,
-        "event_risk_input": event_risk,
-        "correction_state_input": correction_state,
-        "event_news_auto_integration_complete": False,
+        "event_risk": resolved_event_risk,
+        "event_risk_source": "MANUAL_OVERRIDE" if event_risk is not None else "AUTO_LOCAL_EVENT_NEWS_MEMORY",
+        "correction_state": resolved_correction,
+        "correction_state_source": "MANUAL_OVERRIDE" if correction_state is not None else "AUTO_AUDITED_BSE_DAILY_REGIME",
+        "event_news_auto_integration_complete": True,
+        "audited_bse_correction_auto_integration_complete": context.get("correction_context_status") == "AUDITED_BSE_DAILY_CONTEXT",
+        "broader_market_correction_auto_integration_complete": bool(context.get("broader_market_correction_auto_complete")),
         "trade_authorization": False,
         "order_execution_allowed": False,
     }
