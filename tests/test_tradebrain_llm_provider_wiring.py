@@ -19,16 +19,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _known_models_without_loading_llm_package() -> dict[str, list[str]]:
-    """Execute model_catalog.py directly so llm_clients/__init__ cannot import SDKs."""
     namespace = runpy.run_path(str(ROOT / "tradingagents" / "llm_clients" / "model_catalog.py"))
     return namespace["get_known_models"]()
 
 
 class TradeBrainLLMProviderWiringTests(unittest.TestCase):
-    def test_tradebrain_default_is_gemini_not_anthropic(self):
-        self.assertEqual(DEFAULT_CONFIG["llm_provider"], "google")
-        self.assertEqual(DEFAULT_CONFIG["quick_think_llm"], "gemini-3.6-flash")
-        self.assertEqual(DEFAULT_CONFIG["deep_think_llm"], "gemini-3.1-pro-preview")
+    def test_tradebrain_default_is_groq_with_gemini_verifier(self):
+        self.assertEqual(DEFAULT_CONFIG["llm_provider"], "groq")
+        self.assertEqual(DEFAULT_CONFIG["quick_think_llm"], "openai/gpt-oss-20b")
+        self.assertEqual(DEFAULT_CONFIG["deep_think_llm"], "openai/gpt-oss-20b")
+        self.assertEqual(DEFAULT_CONFIG["llm_verifier_provider"], "google")
+        self.assertEqual(DEFAULT_CONFIG["llm_verifier_model"], "gemini-3.6-flash")
+        self.assertTrue(DEFAULT_CONFIG["llm_verifier_material_findings_only"])
 
     def test_groq_is_first_class_settings_and_catalog_provider(self):
         self.assertEqual(settings_manager.PROVIDER_ENV_KEYS["groq"], "GROQ_API_KEY")
