@@ -21,6 +21,7 @@ on:
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
       - "tradingagents/default_config.py"
+      - "tradingagents/horizon_policy.py"
       - "tradingagents/dataflows/interface.py"
       - "tradingagents/dataflows/tradebrain_market.py"
       - "tradingagents/graph/signal_processing.py"
@@ -73,6 +74,7 @@ on:
       - "backend/routers/daily_verdict.py"
       - "backend/app.py"
       - "tradingagents/default_config.py"
+      - "tradingagents/horizon_policy.py"
       - "tradingagents/dataflows/interface.py"
       - "tradingagents/dataflows/tradebrain_market.py"
       - "tradingagents/graph/signal_processing.py"
@@ -151,6 +153,7 @@ jobs:
           scripts/tradebrain_kite_live_stream.py
           scripts/tradebrain_kite_auth.py
           scripts/tradebrain_test_interpretation.py
+          tradingagents/horizon_policy.py
           tradingagents/dataflows/interface.py
           tradingagents/dataflows/tradebrain_market.py
           tradingagents/graph/signal_processing.py
