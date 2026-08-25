@@ -16,6 +16,7 @@ from backend.tradebrain.actual_trade_journal import (
     record_actual_trade,
 )
 from backend.tradebrain.bse_scope import BSE_SCOPE, require_bse_trade_target
+from backend.tradebrain.position_guardian import position_guardian_snapshot
 
 router = APIRouter(prefix="/api/tradebrain/actual-trades", tags=["tradebrain-actual-trades"])
 
@@ -73,7 +74,7 @@ def doctrine():
         "purpose": "Record what the human actually did in BSE Ltd after an advisory; keep it separate from replay and paper outcomes.",
         "instrument": BSE_SCOPE.kite_symbol,
         "isin": BSE_SCOPE.isin,
-        "supports": ["INTRADAY", "SWING_MTF", "PARTIAL_CLOSE", "ADVISORY_LINK", "MANUAL_BROKER_REFERENCE"],
+        "supports": ["INTRADAY", "SWING_MTF", "PARTIAL_CLOSE", "ADVISORY_LINK", "MANUAL_BROKER_REFERENCE", "READ_ONLY_POSITION_GUARDIAN"],
         "swing_funding": "MTF_ONLY",
         "swing_requires": ["MTF_ELIGIBILITY_VERIFIED", "FUNDED_AMOUNT", "MTF_INTEREST_DAYS_FOR_CLOSE_OR_NET_MARK"],
         "charges": (
@@ -108,6 +109,12 @@ def get_actual_trades(
 @router.get("/stats")
 def get_actual_trade_stats():
     return actual_trade_stats()
+
+
+@router.get("/guardian")
+def get_position_guardian():
+    """Read-only risk snapshot for all manually reported open BSE positions."""
+    return position_guardian_snapshot()
 
 
 @router.get("/{trade_id}")
