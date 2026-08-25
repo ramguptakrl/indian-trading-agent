@@ -31,6 +31,9 @@ class ActualTradeCreate(BaseModel):
     advisory_task_id: str | None = Field(default=None, max_length=120)
     stop_loss: float | None = Field(default=None, gt=0)
     take_profit: float | None = Field(default=None, gt=0)
+    swing_funding: Literal["MTF"] | None = None
+    mtf_eligible_verified: bool | None = None
+    funded_amount: float | None = Field(default=None, gt=0)
     broker_order_ref: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=4000)
 
@@ -44,6 +47,7 @@ class ActualTradeClose(BaseModel):
     exit_price: float = Field(gt=0)
     quantity: int | None = Field(default=None, gt=0)
     exit_timestamp: str | None = None
+    mtf_interest_days: int | None = Field(default=None, ge=0)
     actual_charges_override: float | None = Field(default=None, ge=0)
     broker_order_ref: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=4000)
@@ -52,6 +56,7 @@ class ActualTradeClose(BaseModel):
 class ActualTradeMark(BaseModel):
     current_price: float = Field(gt=0)
     source: str = Field(default="MANUAL_OR_MARKET_DATA", max_length=160)
+    mtf_interest_days: int | None = Field(default=None, ge=0)
 
 
 def _call(fn, *args, **kwargs):
@@ -68,8 +73,13 @@ def doctrine():
         "purpose": "Record what the human actually did in BSE Ltd after an advisory; keep it separate from replay and paper outcomes.",
         "instrument": BSE_SCOPE.kite_symbol,
         "isin": BSE_SCOPE.isin,
-        "supports": ["INTRADAY", "SWING", "PARTIAL_CLOSE", "ADVISORY_LINK", "MANUAL_BROKER_REFERENCE"],
-        "charges": "Resident equity charges are estimated unless a user supplies an actual charge override for a closed slice.",
+        "supports": ["INTRADAY", "SWING_MTF", "PARTIAL_CLOSE", "ADVISORY_LINK", "MANUAL_BROKER_REFERENCE"],
+        "swing_funding": "MTF_ONLY",
+        "swing_requires": ["MTF_ELIGIBILITY_VERIFIED", "FUNDED_AMOUNT", "MTF_INTEREST_DAYS_FOR_CLOSE_OR_NET_MARK"],
+        "charges": (
+            "INTRADAY uses resident equity estimates. SWING combines resident equity + Zerodha MTF estimates; "
+            "partial SWING exits allocate full-position estimated costs pro-rata. Actual broker charge overrides remain authoritative."
+        ),
         "broker_order_execution": False,
         "manual_tracking_only": True,
     }
