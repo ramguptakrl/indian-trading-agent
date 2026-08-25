@@ -257,8 +257,8 @@ def corporate_action_context_from_store(
     db_path: str | None = None,
     limit: int = 500,
 ) -> dict[str, Any]:
-    """Build BSE action context from the official event memory already in Trade Brain."""
+    """Build BSE action context from permanent official event memory, regardless of inbox workflow status."""
     from backend.tradebrain.corporate_event_store import list_events
 
-    events = list_events(limit=max(1, min(int(limit), 500)), db_path=db_path)
+    events = list_events(status=None, limit=max(1, min(int(limit), 500)), db_path=db_path)
     return corporate_action_context(events, session_date=session_date, known_by=known_by)
