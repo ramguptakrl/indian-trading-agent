@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useAnalysisStore } from "@/lib/store";
 import { getIndiaMarketDate } from "@/lib/market-time";
 import { DecisionCard } from "@/components/analysis/DecisionCard";
@@ -11,29 +10,19 @@ import { DebateView } from "@/components/analysis/DebateView";
 import { AnalysisOptions } from "@/components/analysis/AnalysisOptions";
 import { StatsCard } from "@/components/analysis/StatsCard";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { TickerSearch } from "@/components/TickerSearch";
 import { HelpSection } from "@/components/HelpSection";
 import { analysisHelp } from "@/lib/help-content";
-import { Loader2, Play, RotateCcw, History, Calculator } from "lucide-react";
+import { Loader2, Play, RotateCcw, History, Calculator, Building2 } from "lucide-react";
 import { NextStep } from "@/components/NextStep";
 import { PositionSizeCalculator } from "@/components/PositionSizeCalculator";
 
+const BSE_TICKER = "BSE";
+
 export default function AnalysisPage() {
-  return (
-    <Suspense fallback={<div className="p-6"><p className="text-muted-foreground">Loading...</p></div>}>
-      <AnalysisPageInner />
-    </Suspense>
-  );
-}
-
-function AnalysisPageInner() {
-  const searchParams = useSearchParams();
-  const defaultTicker = searchParams.get("ticker") || "";
   const analysis = useAnalysisStore();
-
-  const [tickerInput, setTickerInput] = useState(defaultTicker || analysis.ticker || "");
   const [tradeDateInput, setTradeDateInput] = useState(analysis.tradeDate || "");
   const [indiaToday, setIndiaToday] = useState("");
   const [selectedAnalysts, setSelectedAnalysts] = useState<string[]>([
@@ -56,8 +45,8 @@ function AnalysisPageInner() {
   }, [analysis.tradeDate]);
 
   const handleRun = () => {
-    if (!tickerInput.trim() || !tradeDateInput) return;
-    analysis.start(tickerInput.trim(), tradeDateInput, {
+    if (!tradeDateInput) return;
+    analysis.start(BSE_TICKER, tradeDateInput, {
       analysts: selectedAnalysts,
       max_debate_rounds: depth,
       max_risk_discuss_rounds: depth,
@@ -65,15 +54,17 @@ function AnalysisPageInner() {
     });
   };
 
-  const displayTicker = analysis.ticker || tickerInput;
-
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Run Analysis</h1>
-          <p className="text-sm text-muted-foreground">
-            Multi-agent research feeding the deterministic Trade Brain advisory gate
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold">BSE Ltd Analysis</h1>
+            <Badge variant="outline">NSE:BSE</Badge>
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">
+            BSE-specific multi-agent research feeding the deterministic Trade Brain advisory gate.
+            Broader market inputs are context only.
           </p>
         </div>
         <div className="flex gap-2">
@@ -90,19 +81,21 @@ function AnalysisPageInner() {
         </div>
       </div>
 
-      <Card className="overflow-visible">
-        <CardContent className="p-4 overflow-visible">
-          <div className="flex gap-3 items-end">
-            <div className="flex-1">
-              <label className="text-xs text-muted-foreground mb-1 block">Ticker Symbol</label>
-              <TickerSearch
-                value={tickerInput}
-                onChange={setTickerInput}
-                placeholder="Search stock (e.g., Infosys, RELIANCE)"
-                disabled={analysis.status === "running"}
-              />
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex gap-4 items-end">
+            <div className="flex-1 rounded-lg border bg-muted/20 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <Building2 className="h-5 w-5 text-green-600" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Fixed Trade Brain instrument</p>
+                  <p className="font-semibold">BSE Ltd · NSE:BSE</p>
+                  <p className="text-[11px] text-muted-foreground">ISIN INE118H01025 · only tradable target on this branch</p>
+                </div>
+              </div>
             </div>
-            <div className="w-52">
+
+            <div className="w-56">
               <label className="text-xs text-muted-foreground mb-1 block">
                 Analysis Date <span className="font-semibold text-foreground">(India / IST)</span>
               </label>
@@ -115,24 +108,25 @@ function AnalysisPageInner() {
               />
               {indiaToday && (
                 <p className="mt-1 text-[10px] text-muted-foreground">
-                  Defaults to India market date: {indiaToday}
+                  India market date: {indiaToday}
                 </p>
               )}
             </div>
+
             <Button
               onClick={handleRun}
-              disabled={analysis.status === "running" || !tickerInput.trim() || !tradeDateInput}
+              disabled={analysis.status === "running" || !tradeDateInput}
               className="h-10"
             >
               {analysis.status === "running" ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Analyzing...
+                  Analyzing BSE...
                 </>
               ) : (
                 <>
                   <Play className="h-4 w-4 mr-2" />
-                  Run Analysis
+                  Analyze BSE
                 </>
               )}
             </Button>
@@ -152,7 +146,7 @@ function AnalysisPageInner() {
 
       {analysis.error && (
         <Card className="border-red-500/30 bg-red-500/5">
-          <CardContent className="p-4 text-red-400">{analysis.error}</CardContent>
+          <CardContent className="p-4 text-red-700">{analysis.error}</CardContent>
         </Card>
       )}
 
@@ -176,7 +170,7 @@ function AnalysisPageInner() {
       {analysis.signal && (
         <DecisionCard
           signal={analysis.signal}
-          ticker={displayTicker}
+          ticker={BSE_TICKER}
           duration={analysis.duration}
           advisory={analysis.tradebrainAdvisory}
         />
@@ -206,20 +200,20 @@ function AnalysisPageInner() {
 
       {analysis.status === "completed" && analysis.signal && (
         <NextStep
-          title="Review or log the outcome"
-          description="This analysis is advisory research, not an order. If you independently act on a candidate, you can later log the observed outcome for research and learning."
+          title="Review BSE evidence or log an outcome"
+          description="This result is advisory research, not an order. If you independently act on it, record the real fill in Actual Trades after executing externally."
           href="/history"
-          buttonText="Analysis History"
+          buttonText="BSE Analysis Outcomes"
           icon={History}
         />
       )}
 
-      <HelpSection title="How to Use Analysis" items={analysisHelp} />
+      <HelpSection title="How BSE Analysis Works" items={analysisHelp} />
 
       <PositionSizeCalculator
         open={calcOpen}
         onClose={() => setCalcOpen(false)}
-        ticker={displayTicker}
+        ticker={BSE_TICKER}
       />
     </div>
   );
