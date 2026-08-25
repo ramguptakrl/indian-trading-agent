@@ -72,13 +72,13 @@ export function getIndiaMarketDayContext(date: Date = new Date()): string {
   const { hour, minute } = getZonedParts(date, INDIA_MARKET_TIME_ZONE);
   const totalMin = hour * 60 + minute;
 
-  if (totalMin < 9 * 60) return "India market opens at 9:15 AM IST. Good time to plan your trades.";
-  if (totalMin < 9 * 60 + 15) return "India market opens in minutes. Review overnight news and top picks.";
-  if (totalMin < 10 * 60 + 30) return "India opening hour — watch for gaps and early breakouts.";
-  if (totalMin < 14 * 60) return "India mid-session — most stable period. Good for swing trade entries.";
-  if (totalMin < 15 * 60 + 10) return "India closing phase — manage live setups carefully.";
+  if (totalMin < 9 * 60) return "India market opens at 9:15 AM IST. Review the BSE plan and overnight context.";
+  if (totalMin < 9 * 60 + 15) return "India market opens in minutes. Re-check BSE gaps, news and risk context.";
+  if (totalMin < 10 * 60 + 30) return "India opening hour — BSE gap, volume and early structure are most important.";
+  if (totalMin < 14 * 60) return "India mid-session — reassess BSE price structure and swing-quality evidence.";
+  if (totalMin < 15 * 60 + 10) return "India closing phase — manage BSE intraday risk and review swing validity.";
   if (totalMin < 15 * 60 + 15) return "No fresh intraday entries after 3:10 PM IST; flatten by 3:15 PM IST.";
-  if (totalMin < 15 * 60 + 30) return "Intraday hard-exit window has passed; India market is nearing close.";
-  if (totalMin < 16 * 60) return "India market closed. Review today's trades and prep for tomorrow.";
-  return "India market closed. After-market study/replay period.";
+  if (totalMin < 15 * 60 + 30) return "BSE intraday hard-exit window has passed; India market is nearing close.";
+  if (totalMin < 16 * 60) return "India market closed. Review BSE outcomes and prepare the after-market evidence cycle.";
+  return "India market closed. BSE after-market study/replay period.";
 }
