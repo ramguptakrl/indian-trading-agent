@@ -26,9 +26,9 @@ type NavGroup = {
   items: NavItem[];
 };
 
-// Trade Brain is intentionally a BSE Ltd product. Generic ITA discovery surfaces such as
-// Top Picks, multi-stock scanning, watchlists and generic strategy catalogs are not part of
-// the BSE runtime navigation. Broader market information survives only as BSE context.
+// Trade Brain is intentionally a BSE Ltd product. Legacy multi-stock discovery and
+// generic strategy surfaces are not part of the BSE runtime navigation. Broader market
+// information survives only as context for BSE Ltd decisions.
 const navGroups: NavGroup[] = [
   {
     items: [

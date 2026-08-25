@@ -110,23 +110,22 @@ class Phase6ResidentCostTests(unittest.TestCase):
                 entry_price=1000, exit_price=950, quantity=100,
             )
 
-    def test_cost_profile_is_resident_and_mtf_disabled(self):
+    def test_legacy_equity_cost_profile_remains_non_mtf(self):
         profile = cost_profile()
         self.assertEqual(profile["trader_profile"], "RESIDENT_INDIAN")
-        # This legacy equity-cost profile remains CNC/MIS-only. MTF financing is a
-        # separate versioned profile in backend.tradebrain.mtf_economics.
-        self.assertFalse(profile["mtf_used"])
-        self.assertEqual(profile["financing_interest_rate"], 0)
-        self.assertFalse(profile["order_api_enabled"])
+        self.assertFalse(profile["mtf_enabled"])
+        self.assertEqual(profile["funding_interest_pct"], 0.0)
+        self.assertFalse(profile["data_credential_boundary"]["order_api_enabled"])
 
     def test_net_target_solver_really_meets_after_cost_target(self):
-        solved = solve_exit_price_for_net_profit(
+        solved_exit = solve_exit_price_for_net_profit(
+            desired_net_profit=500,
             mode="INTRADAY", exchange="NSE", direction="LONG",
-            entry_price=1000, quantity=100, target_net_profit=500,
+            entry_price=1000, quantity=100,
         )
         recomputed = calculate_equity_trade_costs(
             mode="INTRADAY", exchange="NSE", direction="LONG",
-            entry_price=1000, exit_price=solved["exit_price"], quantity=100,
+            entry_price=1000, exit_price=solved_exit, quantity=100,
         )
         self.assertGreaterEqual(recomputed["net_pnl"], 500)
         self.assertFalse(recomputed["mtf_used"])
@@ -137,7 +136,8 @@ class Phase6PaperLedgerTests(unittest.TestCase):
         fd, self.path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
         os.unlink(self.path)
-        create_paper_account(account_id="phase6", initial_cash=100000, db_path=self.path)
+        self.account = create_paper_account(name="phase6", starting_cash=100000, db_path=self.path)
+        self.account_id = self.account["account_id"]
 
     def tearDown(self):
         if os.path.exists(self.path):
@@ -146,58 +146,62 @@ class Phase6PaperLedgerTests(unittest.TestCase):
     def test_insufficient_cash_is_rejected_without_leverage(self):
         with self.assertRaises(ValueError):
             open_paper_position(
-                account_id="phase6", ticker="BSE", exchange="NSE", mode="SWING",
+                account_id=self.account_id, ticker="BSE", exchange="NSE", mode="SWING",
                 direction="LONG", entry_price=2000, quantity=100,
-                opened_at=datetime(2026, 8, 21, 12, 0, tzinfo=IST),
+                entry_timestamp=datetime(2026, 8, 21, 12, 0, tzinfo=IST),
                 db_path=self.path,
             )
 
     def test_intraday_open_after_1510_is_rejected(self):
         with self.assertRaises(ValueError):
             open_paper_position(
-                account_id="phase6", ticker="BSE", exchange="NSE", mode="INTRADAY",
+                account_id=self.account_id, ticker="BSE", exchange="NSE", mode="INTRADAY",
                 direction="LONG", entry_price=1000, quantity=10,
-                opened_at=datetime(2026, 8, 21, 15, 10, tzinfo=IST),
+                entry_timestamp=datetime(2026, 8, 21, 15, 10, tzinfo=IST),
                 db_path=self.path,
             )
 
     def test_intraday_close_applies_net_pnl_once(self):
         position = open_paper_position(
-            account_id="phase6", ticker="BSE", exchange="NSE", mode="INTRADAY",
+            account_id=self.account_id, ticker="BSE", exchange="NSE", mode="INTRADAY",
             direction="LONG", entry_price=1000, quantity=10,
-            opened_at=datetime(2026, 8, 21, 10, 0, tzinfo=IST),
+            entry_timestamp=datetime(2026, 8, 21, 10, 0, tzinfo=IST),
             db_path=self.path,
         )
         result = close_paper_position(
             position_id=position["position_id"], exit_price=1010,
-            closed_at=datetime(2026, 8, 21, 11, 0, tzinfo=IST), db_path=self.path,
+            exit_timestamp=datetime(2026, 8, 21, 11, 0, tzinfo=IST), db_path=self.path,
         )
-        account = get_paper_account("phase6", db_path=self.path)
+        account = get_paper_account(self.account_id, db_path=self.path)
         self.assertAlmostEqual(account["cash_balance"], 100000 + result["net_pnl"], places=2)
 
     def test_intraday_late_exit_is_recorded_as_violation_not_hidden(self):
         position = open_paper_position(
-            account_id="phase6", ticker="BSE", exchange="NSE", mode="INTRADAY",
+            account_id=self.account_id, ticker="BSE", exchange="NSE", mode="INTRADAY",
             direction="LONG", entry_price=1000, quantity=10,
-            opened_at=datetime(2026, 8, 21, 10, 0, tzinfo=IST),
+            entry_timestamp=datetime(2026, 8, 21, 10, 0, tzinfo=IST),
             db_path=self.path,
         )
         result = close_paper_position(
             position_id=position["position_id"], exit_price=1005,
-            closed_at=datetime(2026, 8, 21, 15, 20, tzinfo=IST), db_path=self.path,
+            exit_timestamp=datetime(2026, 8, 21, 15, 20, tzinfo=IST), db_path=self.path,
         )
-        self.assertTrue(result["rule_violation"])
-        self.assertIn("15:15", " ".join(result["violation_reasons"]))
+        self.assertTrue(result["mode_violation"])
+        self.assertIn("15:15", result["violation_reason"])
 
     def test_swing_can_cross_sessions_and_includes_dp(self):
         position = open_paper_position(
-            account_id="phase6", ticker="BSE", exchange="NSE", mode="SWING",
+            account_id=self.account_id, ticker="BSE", exchange="NSE", mode="SWING",
             direction="LONG", entry_price=1000, quantity=10,
-            opened_at=datetime(2026, 8, 21, 14, 0, tzinfo=IST), db_path=self.path,
+            entry_timestamp=datetime(2026, 8, 21, 14, 0, tzinfo=IST), db_path=self.path,
         )
         result = close_paper_position(
             position_id=position["position_id"], exit_price=1050,
-            closed_at=datetime(2026, 8, 24, 11, 0, tzinfo=IST), db_path=self.path,
+            exit_timestamp=datetime(2026, 8, 24, 11, 0, tzinfo=IST), db_path=self.path,
         )
-        self.assertFalse(result["rule_violation"])
-        self.assertGreater(result["charges"]["dp_charge"], 0)
+        self.assertFalse(result["mode_violation"])
+        self.assertGreater(result["economics"]["charges"]["dp_charge"], 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
