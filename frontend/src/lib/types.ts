@@ -50,10 +50,23 @@ export interface AnalysisRequest {
   max_risk_discuss_rounds: number;
 }
 
+export interface TradeBrainGeometry {
+  mode?: "INTRADAY" | "SWING" | string;
+  direction?: "LONG" | "SHORT" | string;
+  entry?: number;
+  stop_loss?: number;
+  take_profit?: number;
+  gross_reward_risk?: number | null;
+  soft_preferred_reward_risk?: number | null;
+  soft_preference_source?: string;
+  soft_parameter_version?: number | null;
+}
+
 export interface TradeBrainAdvisory {
   tradebrain_version?: string;
   ticker?: string;
   exchange?: string;
+  evaluated_at_ist?: string;
   final_status?: string;
   reason?: string;
   advisory_only?: boolean;
@@ -61,6 +74,8 @@ export interface TradeBrainAdvisory {
   order_execution_allowed?: boolean;
   requires_phase10_final_gate_for_live_use?: boolean;
   ai_candidate?: Record<string, unknown>;
+  trade_geometry?: TradeBrainGeometry | null;
+  operating_mode?: Record<string, unknown> | null;
   calendar?: {
     calendar_verified?: boolean;
     session_type?: string;
@@ -70,17 +85,25 @@ export interface TradeBrainAdvisory {
   } | null;
   gate?: {
     action?: string;
+    active_mode?: string;
+    allowed_for_advisory?: boolean;
     hard_rule_failures?: string[];
     warnings?: string[];
+    reward_risk?: number | null;
+    preferred_reward_risk?: number | null;
+    preferred_reward_risk_source?: string;
     soft_parameter_registry_applied?: boolean;
     soft_parameter_source?: string;
     soft_parameter_version?: number | null;
   } | null;
   costs?: {
     status?: string;
+    quantity?: number | null;
     total_charges_rupees?: number;
     net_reward_rupees?: number;
+    net_loss_rupees?: number;
     net_risk_rupees?: number;
+    net_reward_risk?: number | null;
   } | null;
 }
 
