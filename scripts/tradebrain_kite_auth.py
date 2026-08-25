@@ -5,10 +5,7 @@ This script never places, modifies, or cancels orders. It performs only the docu
 Kite login/token exchange, saves the resulting session values to the repository-local
 ignored .env file, and validates the session with a read-only quote request.
 
-The API secret is prompted without echo unless it already exists in the local process
-or local .env. It is NOT written to .env by this helper. The short-lived redirect URL
-or request_token is accepted through a normal console input so Windows clipboard paste
-works reliably.
+The API secret is prompted without echo and is NOT written to .env by this helper.
 """
 
 from __future__ import annotations
@@ -101,6 +98,22 @@ def extract_request_token(value: str) -> str:
     return raw
 
 
+def _prompt_api_secret(local_env: dict[str, str]) -> str:
+    inherited = (os.getenv("KITE_API_SECRET") or local_env.get("KITE_API_SECRET") or "").strip()
+    if inherited:
+        print("[warn] KITE_API_SECRET was supplied by the local environment/.env; make sure it is the CURRENT secret for this exact Kite app.")
+        return inherited
+
+    first = getpass.getpass("Kite API secret (hidden): ").strip()
+    if not first:
+        return ""
+    second = getpass.getpass("Paste Kite API secret again to confirm (hidden): ").strip()
+    if first != second:
+        print("The two API secret entries did not match. Nothing was sent to Zerodha.", file=sys.stderr)
+        return ""
+    return first
+
+
 def _post_form(url: str, data: dict[str, str]) -> dict[str, Any]:
     encoded = urllib.parse.urlencode(data).encode("utf-8")
     request = urllib.request.Request(
@@ -122,7 +135,9 @@ def _post_form(url: str, data: dict[str, str]) -> dict[str, Any]:
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Could not reach Kite token endpoint: {exc.reason}") from exc
     if not isinstance(payload, dict) or payload.get("status") != "success":
-        raise RuntimeError(f"Unexpected Kite token response: {payload.get('message') if isinstance(payload, dict) else 'invalid response'}")
+        raise RuntimeError(
+            f"Unexpected Kite token response: {payload.get('message') if isinstance(payload, dict) else 'invalid response'}"
+        )
     data_obj = payload.get("data")
     if not isinstance(data_obj, dict) or not data_obj.get("access_token"):
         raise RuntimeError("Kite token response did not contain access_token")
@@ -195,13 +210,13 @@ def main() -> int:
         print("Kite API key is required.", file=sys.stderr)
         return 2
 
-    api_secret = (os.getenv("KITE_API_SECRET") or local_env.get("KITE_API_SECRET") or getpass.getpass("Kite API secret (hidden): ")).strip()
+    api_secret = _prompt_api_secret(local_env)
     if not api_secret:
-        print("Kite API secret is required for token exchange.", file=sys.stderr)
+        print("Kite API secret is required and both confirmation entries must match.", file=sys.stderr)
         return 2
 
     login_url = f"{KITE_LOGIN_URL}?{urllib.parse.urlencode({'v': '3', 'api_key': api_key})}"
-    print("\n1) Complete the Zerodha login in your browser.")
+    print("\n1) Complete a FRESH Zerodha login in your browser.")
     print("2) After redirect, copy the ENTIRE address-bar URL (easiest), or only the request_token value.")
     print("3) Return here, paste it at the normal prompt, then press Enter immediately.")
     print("   The pasted URL WILL be visible locally so Windows Ctrl+V works reliably.")
@@ -217,7 +232,10 @@ def main() -> int:
     pasted = input("Paste redirect URL or request_token: ")
     request_token = extract_request_token(pasted)
     if len(request_token) < 10:
-        print("No valid request_token was pasted. Re-run the helper, complete a fresh Zerodha login, paste the full redirected URL at the prompt, and press Enter.", file=sys.stderr)
+        print(
+            "No valid request_token was pasted. Re-run the helper and complete a fresh Zerodha login.",
+            file=sys.stderr,
+        )
         return 2
 
     checksum = hashlib.sha256(f"{api_key}{request_token}{api_secret}".encode("utf-8")).hexdigest()
@@ -229,7 +247,15 @@ def main() -> int:
         access_token = str(session["access_token"]).strip()
         quote = _validate_ltp(api_key, access_token, args.instrument.strip().upper())
     except RuntimeError as exc:
-        print(str(exc), file=sys.stderr)
+        message = str(exc)
+        print(message, file=sys.stderr)
+        if "Invalid `checksum`" in message or "Invalid checksum" in message:
+            print(
+                "[diagnostic] Zerodha rejected the api_key + request_token + api_secret checksum. "
+                "Use the CURRENT API secret from the SAME Kite Connect app as this API key, then generate a NEW request_token. "
+                "If the secret was regenerated in the developer console, the previous secret is no longer the one to use.",
+                file=sys.stderr,
+            )
         return 1
 
     updates = {
