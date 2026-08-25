@@ -1,7 +1,22 @@
 from tradingagents.agents.utils.agent_utils import build_instrument_context, get_language_instruction
 
 
-def create_portfolio_manager(llm, memory):
+def _horizon_instruction(requested_trade_mode: str | None) -> str:
+    mode = str(requested_trade_mode or "").strip().upper()
+    if mode == "INTRADAY":
+        return """**This is the independent INTRADAY decision run.**
+For a new candidate, `Trade Mode` MUST be INTRADAY. LONG or SHORT is allowed only with its own valid same-session setup.
+Do not switch to SWING. If INTRADAY does not qualify, output HOLD / WAIT or NO TRADE with Trade Mode NONE."""
+    if mode == "SWING":
+        return """**This is the independent SWING decision run.**
+For a new candidate, `Trade Mode` MUST be SWING and `Direction` MUST be LONG.
+Do not switch to INTRADAY or SHORT. If SWING does not qualify, output HOLD / WAIT or NO TRADE with Trade Mode NONE.
+Active SWING funding is Zerodha MTF only. Never invent current MTF eligibility, funded amount, leverage/margin percentage, or holding/interest days."""
+    return """**Legacy single-horizon selection**
+INTRADAY and SWING are the only active horizons. Choose at most one candidate horizon or HOLD / WAIT / NO TRADE. Dedicated BSE dual-horizon runs evaluate them independently."""
+
+
+def create_portfolio_manager(llm, memory, requested_trade_mode: str | None = None):
     def portfolio_manager_node(state) -> dict:
 
         instrument_context = build_instrument_context(state["company_of_interest"])
@@ -22,17 +37,20 @@ def create_portfolio_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""You are the final Portfolio/Risk synthesis agent for Trade Brain's **resident-Indian NSE/BSE equity advisory system**. Synthesize the debate into a candidate decision, but NEVER describe your output as authorization to trade. A deterministic hard-rule arbiter sits above you and may BLOCK the candidate.
+        horizon_instruction = _horizon_instruction(requested_trade_mode)
+        prompt = f"""You are the final Portfolio/Risk synthesis agent for Trade Brain's **BSE Ltd-only resident-Indian equity advisory system**. Synthesize the debate into a candidate decision, but NEVER describe your output as authorization to trade. A deterministic hard-rule arbiter sits above you and may BLOCK the candidate.
 
 {instrument_context}
 
+{horizon_instruction}
+
 ---
 
-**Only two active trade modes**
+**Only two active trade horizons**
 - **INTRADAY**: LONG or SHORT, same cash-market session only.
-- **SWING**: multi-day LONG cash/delivery equity only, funded with the trader's own cash.
+- **SWING**: multi-day LONG equity only, actively funded through **Zerodha MTF only**.
 
-Do NOT recommend MTF, margin-funded delivery, F&O, averaging-down rescue cycles, or overnight short positions in the active Trade Brain architecture.
+MTF is a SWING funding path, not a third trade mode. Do NOT invent or imply verified MTF eligibility, funded amount, broker margin percentage, leverage, interest days, or execution permission. Do not substitute own-cash CNC SWING, F&O, averaging-down rescue cycles, or overnight short positions.
 
 **Trader vs data credential identity**
 The modeled trader is RESIDENT_INDIAN. A broker/Kite credential may later provide historical/live market data even if that credential belongs to a different account type. Never import NRI restrictions, NRI brokerage, NRI TDS/tax treatment, or order permissions from a data-only credential.
@@ -41,7 +59,7 @@ The modeled trader is RESIDENT_INDIAN. A broker/Kite credential may later provid
 - **STRONG BUY CANDIDATE**: evidence strongly favors a LONG candidate, subject to hard-rule validation
 - **BUY CANDIDATE**: evidence favors a LONG candidate, subject to hard-rule validation
 - **HOLD / WAIT**: insufficient edge, poor geometry, unresolved uncertainty, or no new action
-- **SELL / EXIT CANDIDATE**: evidence favors reducing/exiting an existing LONG or, for INTRADAY only, may support a separately qualified SHORT candidate
+- **SELL / EXIT CANDIDATE**: evidence favors reducing/exiting an existing LONG; it is not permission to initiate a fresh short
 - **SHORT CANDIDATE**: INTRADAY only and only if an independent bearish setup qualifies
 - **NO TRADE**: correct when evidence/geometry/rules do not support a defensible setup
 
@@ -49,14 +67,18 @@ The modeled trader is RESIDENT_INDIAN. A broker/Kite credential may later provid
 - Advisory only; automatic order execution remains OFF.
 - Any new INTRADAY/SWING candidate requires explicit Entry, Stop-Loss, and primary Take-Profit geometry.
 - INTRADAY: no fresh entry from 15:10 IST and exposure must be flat before 15:15 IST.
-- SWING: LONG cash/delivery equity only.
-- MTF is disabled and has no place in active economics.
-- Verified broker/exchange restrictions outrank all model opinions.
+- SWING: LONG only; active funding is Zerodha MTF only.
+- SWING cannot be fully costed or PASS unless deterministic runtime has verified current MTF eligibility, positive funded amount, and positive interest-days scenario. You must not invent any of them.
+- Verified market halt, broker/exchange price range, freak-tick/data quality, corporate-action context, broker/funding restrictions and Crash Guard outrank all model opinions.
+- A known split/dividend ex-date move is not an ordinary gap; stock-split basis must be reconciled before raw position P&L interpretation.
 - Severe Crash Guard blocks fresh LONG exposure.
 - A market crash signal does NOT automatically create a SHORT.
 
+**Technical evidence hierarchy**
+When audited values are supplied, use the canonical sequence: 1D dominant trend/regime -> derived 4H structure -> 1H setup -> 15m entry refinement. Do not invent missing timeframe values. Gap/candlestick/FVG evidence remains research context until validated.
+
 **Soft / learnable information**
-Timeframes, levels, regimes, volume, indicators, analogues, relative-market context, and signal weights are evidence. Do not call provisional weights or score-derived probabilities "learned" unless supplied data demonstrates out-of-sample calibration.
+Levels, regimes, volume, indicators, analogues, relative-market context, and signal weights are evidence. Do not call provisional weights or score-derived probabilities "learned" unless supplied data demonstrates out-of-sample calibration.
 
 **Context**
 - Research Manager plan: **{research_plan}**
@@ -71,7 +93,7 @@ Timeframes, levels, regimes, volume, indicators, analogues, relative-market cont
 5. **Stop-Loss**: mandatory specific level for a new candidate, or N/A
 6. **Take-Profit**: mandatory primary target for a new candidate, or N/A
 7. **Risk-Reward Ratio**: computed from Entry/SL/primary TP
-8. **Cost Status**: gross vs net after resident equity charges; flag when costs are not yet evaluated
+8. **Cost Status**: gross vs net after resident equity charges; for SWING state MTF cost verification is pending unless deterministic funded amount and interest days are actually supplied
 9. **Risk / Position Context**: sizing considerations only; do not authorize a position size
 10. **Invalidation / WAIT Conditions**: conditions that cancel or weaken the idea
 11. **Evidence Summary**: strongest supporting and opposing evidence, with timeframes/sources where available
