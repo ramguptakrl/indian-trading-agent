@@ -51,6 +51,9 @@ export const createActualTrade = (data: {
   advisory_task_id?: string;
   stop_loss?: number;
   take_profit?: number;
+  swing_funding?: "MTF";
+  mtf_eligible_verified?: boolean;
+  funded_amount?: number;
   broker_order_ref?: string;
   notes?: string;
 }) => fetchAPI(`/api/tradebrain/actual-trades`, { method: "POST", body: JSON.stringify(data) });
@@ -67,16 +70,25 @@ export const closeActualTrade = (tradeId: string, data: {
   exit_price: number;
   quantity?: number;
   exit_timestamp?: string;
+  mtf_interest_days?: number;
   actual_charges_override?: number;
   broker_order_ref?: string;
   notes?: string;
 }) => fetchAPI(`/api/tradebrain/actual-trades/${tradeId}/close`, { method: "POST", body: JSON.stringify(data) });
 
-export const markActualTrade = (tradeId: string, currentPrice: number, source = "UI_CURRENT_QUOTE") =>
-  fetchAPI(`/api/tradebrain/actual-trades/${tradeId}/mark`, {
-    method: "POST",
-    body: JSON.stringify({ current_price: currentPrice, source }),
-  });
+export const markActualTrade = (
+  tradeId: string,
+  currentPrice: number,
+  source = "UI_CURRENT_QUOTE",
+  mtfInterestDays?: number,
+) => fetchAPI(`/api/tradebrain/actual-trades/${tradeId}/mark`, {
+  method: "POST",
+  body: JSON.stringify({
+    current_price: currentPrice,
+    source,
+    mtf_interest_days: mtfInterestDays,
+  }),
+});
 
 // Watchlist
 export const getWatchlist = () => fetchAPI(`/api/watchlist`);
@@ -284,18 +296,6 @@ export const forceSnapshotVerdict = () =>
   fetchAPI(`/api/verdict-calibration/snapshot`, { method: "POST" });
 export const backfillVerdictOutcomes = () =>
   fetchAPI(`/api/verdict-calibration/backfill`, { method: "POST" });
-
-// Performance
-export const getPerformanceAll = (universe = "nifty50", lookbackDays = 60) =>
-  fetchAPI(`/api/performance/all?universe=${universe}&lookback_days=${lookbackDays}`);
-export const getPerformanceGap = (universe = "nifty50", lookbackDays = 60, threshold = 2.0) =>
-  fetchAPI(`/api/performance/gap?universe=${universe}&lookback_days=${lookbackDays}&gap_threshold=${threshold}`);
-export const getPerformanceVolume = (universe = "nifty50", lookbackDays = 60, multiplier = 2.0) =>
-  fetchAPI(`/api/performance/volume?universe=${universe}&lookback_days=${lookbackDays}&volume_multiplier=${multiplier}`);
-export const getPerformanceBreakout = (universe = "nifty50", lookbackDays = 60, window = 20) =>
-  fetchAPI(`/api/performance/breakout?universe=${universe}&lookback_days=${lookbackDays}&window=${window}`);
-export const getPerformanceSRBounce = (universe = "nifty50", lookbackDays = 90) =>
-  fetchAPI(`/api/performance/sr-bounce?universe=${universe}&lookback_days=${lookbackDays}`);
 
 // Scanner
 export const startScan = (data: {

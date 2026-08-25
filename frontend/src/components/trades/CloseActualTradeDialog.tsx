@@ -10,30 +10,31 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 function istNowInput(): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date());
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date());
   const pick = (type: string) => parts.find((p) => p.type === type)?.value || "00";
   return `${pick("year")}-${pick("month")}-${pick("day")}T${pick("hour")}:${pick("minute")}`;
 }
 
-interface Props {
-  open: boolean;
-  trade: ActualTrade | null;
-  onClose: () => void;
-  onSaved: () => void;
+function istDateParts(value: Date): [number, number, number] {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(value);
+  const n = (type: string) => Number(parts.find((p) => p.type === type)?.value || "0");
+  return [n("year"), n("month"), n("day")];
 }
+
+function elapsedIstCalendarDays(entryIso: string, exitLocalInput?: string): number {
+  const [ey, em, ed] = istDateParts(new Date(entryIso));
+  const exitDate = exitLocalInput ? new Date(`${exitLocalInput}:00+05:30`) : new Date();
+  const [xy, xm, xd] = istDateParts(exitDate);
+  return Math.max(0, Math.floor((Date.UTC(xy, xm - 1, xd) - Date.UTC(ey, em - 1, ed)) / 86400000));
+}
+
+interface Props { open: boolean; trade: ActualTrade | null; onClose: () => void; onSaved: () => void; }
 
 export function CloseActualTradeDialog({ open, trade, onClose, onSaved }: Props) {
   const [quantity, setQuantity] = useState("");
   const [exitPrice, setExitPrice] = useState("");
   const [exitTime, setExitTime] = useState(istNowInput());
+  const [mtfInterestDays, setMtfInterestDays] = useState("");
   const [actualCharges, setActualCharges] = useState("");
   const [brokerRef, setBrokerRef] = useState("");
   const [notes, setNotes] = useState("");
@@ -41,102 +42,49 @@ export function CloseActualTradeDialog({ open, trade, onClose, onSaved }: Props)
 
   useEffect(() => {
     if (!open || !trade) return;
-    setQuantity(String(trade.open_quantity));
-    setExitTime(istNowInput());
-    setExitPrice("");
-    setActualCharges("");
-    setBrokerRef("");
-    setNotes("");
+    const now = istNowInput();
+    setQuantity(String(trade.open_quantity)); setExitTime(now); setExitPrice(""); setActualCharges(""); setBrokerRef(""); setNotes("");
+    setMtfInterestDays(trade.mode === "SWING" ? String(elapsedIstCalendarDays(trade.entry_timestamp, now)) : "");
   }, [open, trade]);
 
   if (!trade) return null;
 
   const save = async () => {
-    const qty = Number(quantity);
-    const price = Number(exitPrice);
-    if (!Number.isInteger(qty) || qty <= 0 || qty > trade.open_quantity) {
-      toast.error(`Close quantity must be 1-${trade.open_quantity}`);
-      return;
-    }
-    if (!Number.isFinite(price) || price <= 0) {
-      toast.error("Enter the actual exit fill price");
-      return;
-    }
+    const qty = Number(quantity); const price = Number(exitPrice);
+    if (!Number.isInteger(qty) || qty <= 0 || qty > trade.open_quantity) return toast.error(`Close quantity must be 1-${trade.open_quantity}`);
+    if (!Number.isFinite(price) || price <= 0) return toast.error("Enter the actual exit fill price");
     const charges = actualCharges ? Number(actualCharges) : undefined;
-    if (charges !== undefined && (!Number.isFinite(charges) || charges < 0)) {
-      toast.error("Actual charges must be zero or positive");
-      return;
+    if (charges !== undefined && (!Number.isFinite(charges) || charges < 0)) return toast.error("Actual charges must be zero or positive");
+    let days: number | undefined;
+    if (trade.mode === "SWING") {
+      days = Number(mtfInterestDays);
+      if (!Number.isInteger(days) || days < 0) return toast.error("Enter valid MTF interest days");
     }
 
     setSaving(true);
     try {
       const updated: any = await closeActualTrade(trade.trade_id, {
-        quantity: qty,
-        exit_price: price,
-        exit_timestamp: `${exitTime}:00+05:30`,
-        actual_charges_override: charges,
-        broker_order_ref: brokerRef || undefined,
-        notes: notes || undefined,
+        quantity: qty, exit_price: price, exit_timestamp: `${exitTime}:00+05:30`, mtf_interest_days: days,
+        actual_charges_override: charges, broker_order_ref: brokerRef || undefined, notes: notes || undefined,
       });
-      toast.success(
-        updated.status === "CLOSED"
-          ? `${trade.ticker} actual trade CLOSED`
-          : `${qty} shares closed; ${updated.open_quantity} remain open`,
-      );
-      onSaved();
-      onClose();
-    } catch (e: any) {
-      toast.error(e.message || "Failed to close actual trade");
-    } finally {
-      setSaving(false);
-    }
+      toast.success(updated.status === "CLOSED" ? `${trade.ticker} actual trade CLOSED` : `${qty} shares closed; ${updated.open_quantity} remain open`);
+      onSaved(); onClose();
+    } catch (e: any) { toast.error(e.message || "Failed to close actual trade"); } finally { setSaving(false); }
   };
 
   return (
     <Dialog open={open} onOpenChange={(value) => !value && onClose()}>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Close {trade.ticker} Actual Trade</DialogTitle>
-          <p className="text-xs text-muted-foreground">
-            {trade.mode} {trade.direction} · Entry Rs.{trade.avg_entry_price} · {trade.open_quantity} currently open
-          </p>
-        </DialogHeader>
-
+        <DialogHeader><DialogTitle>Close {trade.ticker} Actual Trade</DialogTitle><p className="text-xs text-muted-foreground">{trade.mode} {trade.direction} · Entry Rs.{trade.avg_entry_price} · {trade.open_quantity} currently open</p></DialogHeader>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-medium mb-1 block">Quantity to Close</label>
-              <Input type="number" min="1" max={trade.open_quantity} step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-            </div>
-            <div>
-              <label className="text-xs font-medium mb-1 block">Actual Exit Price (Rs.)</label>
-              <Input type="number" min="0" step="0.01" value={exitPrice} onChange={(e) => setExitPrice(e.target.value)} autoFocus />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-medium mb-1 block">Actual Exit Time (IST)</label>
-            <Input type="datetime-local" value={exitTime} onChange={(e) => setExitTime(e.target.value)} />
-          </div>
-          <div>
-            <label className="text-xs font-medium mb-1 block">Actual Charges for This Closed Slice (optional)</label>
-            <Input type="number" min="0" step="0.01" value={actualCharges} onChange={(e) => setActualCharges(e.target.value)} placeholder="Leave blank to use resident cost estimate" />
-            <p className="mt-1 text-[11px] text-muted-foreground">Use this if you copy the actual broker-statement charge amount. Otherwise the journal keeps an estimate.</p>
-          </div>
-          <div>
-            <label className="text-xs font-medium mb-1 block">Broker Exit Ref (optional)</label>
-            <Input value={brokerRef} onChange={(e) => setBrokerRef(e.target.value)} />
-          </div>
-          <div>
-            <label className="text-xs font-medium mb-1 block">Exit Notes (optional)</label>
-            <textarea className="min-h-20 w-full rounded-md border bg-background p-3 text-sm" value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-            <Button onClick={save} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              {Number(quantity) < trade.open_quantity ? "Partial Close" : "Close Trade"}
-            </Button>
-          </div>
+          {trade.mode === "SWING" && <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-3 text-xs"><div className="font-medium">MTF-funded SWING</div><div className="text-muted-foreground">Funded amount: {trade.funded_amount != null ? `₹${trade.funded_amount.toLocaleString("en-IN")}` : "metadata missing"}. Interest days below are prefilled from elapsed IST calendar days; correct them if your broker statement differs.</div></div>}
+          <div className="grid grid-cols-2 gap-4"><div><label className="text-xs font-medium mb-1 block">Quantity to Close</label><Input type="number" min="1" max={trade.open_quantity} step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} /></div><div><label className="text-xs font-medium mb-1 block">Actual Exit Price (Rs.)</label><Input type="number" min="0" step="0.01" value={exitPrice} onChange={(e) => setExitPrice(e.target.value)} autoFocus /></div></div>
+          <div><label className="text-xs font-medium mb-1 block">Actual Exit Time (IST)</label><Input type="datetime-local" value={exitTime} onChange={(e) => { setExitTime(e.target.value); if (trade.mode === "SWING") setMtfInterestDays(String(elapsedIstCalendarDays(trade.entry_timestamp, e.target.value))); }} /></div>
+          {trade.mode === "SWING" && <div><label className="text-xs font-medium mb-1 block">MTF Interest Days</label><Input type="number" min="0" step="1" value={mtfInterestDays} onChange={(e) => setMtfInterestDays(e.target.value)} /><p className="mt-1 text-[11px] text-muted-foreground">Used only for the journal estimate. Enter broker-correct days if the prefill differs.</p></div>}
+          <div><label className="text-xs font-medium mb-1 block">Actual Charges for This Closed Slice (optional)</label><Input type="number" min="0" step="0.01" value={actualCharges} onChange={(e) => setActualCharges(e.target.value)} placeholder={trade.mode === "SWING" ? "Prefer broker-statement charges when available" : "Leave blank to use resident cost estimate"} /><p className="mt-1 text-[11px] text-muted-foreground">If supplied, the broker-statement charge amount overrides the software estimate for this closed slice.</p></div>
+          <div><label className="text-xs font-medium mb-1 block">Broker Exit Ref (optional)</label><Input value={brokerRef} onChange={(e) => setBrokerRef(e.target.value)} /></div>
+          <div><label className="text-xs font-medium mb-1 block">Exit Notes (optional)</label><textarea className="min-h-20 w-full rounded-md border bg-background p-3 text-sm" value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
+          <div className="flex justify-end gap-2"><Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button><Button onClick={save} disabled={saving}>{saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}{Number(quantity) < trade.open_quantity ? "Partial Close" : "Close Trade"}</Button></div>
         </div>
       </DialogContent>
     </Dialog>

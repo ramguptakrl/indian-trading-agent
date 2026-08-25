@@ -60,6 +60,10 @@ export interface TradeBrainGeometry {
   soft_preferred_reward_risk?: number | null;
   soft_preference_source?: string;
   soft_parameter_version?: number | null;
+  swing_funding?: "MTF" | string | null;
+  mtf_eligible_verified?: boolean | null;
+  funded_amount?: number | null;
+  mtf_interest_days?: number | null;
 }
 
 export interface TradeBrainAdvisory {
@@ -95,6 +99,10 @@ export interface TradeBrainAdvisory {
     soft_parameter_registry_applied?: boolean;
     soft_parameter_source?: string;
     soft_parameter_version?: number | null;
+    swing_funding?: "MTF" | string | null;
+    mtf_eligible_verified?: boolean | null;
+    funded_amount?: number | null;
+    mtf_interest_days?: number | null;
   } | null;
   costs?: {
     status?: string;
@@ -104,6 +112,7 @@ export interface TradeBrainAdvisory {
     net_loss_rupees?: number;
     net_risk_rupees?: number;
     net_reward_risk?: number | null;
+    mtf_used?: boolean;
   } | null;
 }
 
@@ -158,6 +167,10 @@ export interface ActualTradeExit {
   actual_charges_override?: number | null;
   charges_used: number;
   net_pnl: number;
+  mtf_interest_days?: number | null;
+  mtf_funded_amount_allocated?: number | null;
+  cost_allocation_method?: string | null;
+  economics?: Record<string, unknown> | null;
   broker_order_ref?: string | null;
   notes?: string | null;
 }
@@ -175,6 +188,11 @@ export interface ActualTrade {
   entry_timestamp: string;
   stop_loss?: number | null;
   take_profit?: number | null;
+  swing_funding?: "MTF" | null;
+  mtf_eligible_verified?: boolean | null;
+  funded_amount?: number | null;
+  mtf_profile_key?: string | null;
+  mtf_metadata_status?: "COMPLETE" | "LEGACY_MTF_METADATA_MISSING" | "NOT_APPLICABLE" | string;
   broker_order_ref?: string | null;
   status: "OPEN" | "PARTIALLY_CLOSED" | "CLOSED";
   advisory_alignment: string;
@@ -200,10 +218,15 @@ export interface ActualTradeMark {
   source: string;
   open_quantity: number;
   unrealized_gross_pnl: number;
-  estimated_open_charges_if_closed_now?: number;
-  estimated_open_net_pnl_if_closed_now: number;
+  estimated_open_charges_if_closed_now?: number | null;
+  estimated_open_net_pnl_if_closed_now: number | null;
   realized_net_pnl: number;
-  combined_realized_plus_estimated_open_net_pnl: number;
+  combined_realized_plus_estimated_open_net_pnl: number | null;
+  estimate_status?: string;
+  mtf_interest_days?: number | null;
+  mtf_profile_key?: string | null;
+  mtf_funded_amount_allocated?: number | null;
+  cost_allocation_method?: string | null;
   charges_estimated?: boolean;
   order_execution_allowed: false;
 }
@@ -257,46 +280,3 @@ export interface BacktestWSEvent {
   max_drawdown_pct?: number;
   total_pnl?: number;
 }
-
-export interface WSEvent {
-  type: "report" | "debate" | "risk_debate" | "signal" | "agent_status" | "complete" | "error" | "stats" | "heartbeat";
-  section?: string;
-  content?: string;
-  side?: string;
-  agent?: string;
-  status?: string;
-  decision?: string;
-  research_label?: string;
-  ticker?: string;
-  message?: string;
-  duration_seconds?: number;
-  llm_calls?: number;
-  tool_calls?: number;
-  tokens_in?: number;
-  tokens_out?: number;
-  total_tokens?: number;
-  cost_usd?: number;
-  cost_inr?: number;
-  per_model?: Record<string, { input: number; output: number }>;
-  trade_authorization?: boolean;
-  requires_tradebrain_gate?: boolean;
-  tradebrain_advisory?: TradeBrainAdvisory | null;
-  chunk?: number;
-  last_activity?: string;
-  stats?: Record<string, number>;
-}
-
-export type Signal =
-  | "LONG_CANDIDATE"
-  | "SHORT_CANDIDATE"
-  | "EXIT_CANDIDATE"
-  | "WAIT"
-  | "NO_TRADE"
-  // Historical/upstream compatibility only:
-  | "STRONG BUY"
-  | "BUY"
-  | "HOLD"
-  | "SELL"
-  | "SHORT"
-  | "OVERWEIGHT"
-  | "UNDERWEIGHT";
