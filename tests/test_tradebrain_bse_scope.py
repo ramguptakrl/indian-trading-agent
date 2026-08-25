@@ -38,13 +38,31 @@ class TradeBrainBseScopeTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             AnalysisRequest(ticker="INFY", trade_date="2026-08-25")
 
-    def test_frontend_analysis_has_no_generic_ticker_picker(self):
+    def test_frontend_analysis_is_fixed_bse_and_dual_horizon(self):
         page = (ROOT / "frontend" / "src" / "app" / "analysis" / "page.tsx").read_text(encoding="utf-8")
         self.assertIn('const BSE_TICKER = "BSE"', page)
         self.assertNotIn("TickerSearch", page)
-        self.assertIn("Analyze BSE", page)
+        self.assertNotIn("useAnalysisStore", page)
+        self.assertIn("useHorizonAnalysisStore", page)
+        self.assertIn("Analyze INTRADAY + SWING", page)
+        self.assertIn("INTRADAY plan", page)
+        self.assertIn("SWING · MTF plan", page)
+        self.assertIn("SWING · ZERODHA MTF", page)
+        self.assertIn("Neither horizon may substitute for the other", page)
         self.assertIn("Analysis Date", page)
         self.assertIn("India / IST", page)
+
+    def test_frontend_dual_horizon_client_uses_paired_backend(self):
+        client = (ROOT / "frontend" / "src" / "lib" / "tradebrain-horizon-api.ts").read_text(encoding="utf-8")
+        store = (ROOT / "frontend" / "src" / "lib" / "horizon-analysis-store.ts").read_text(encoding="utf-8")
+        self.assertIn("/api/analysis/run-horizons", client)
+        self.assertIn("/api/analysis/ws/", client)
+        self.assertIn('TradeBrainHorizon = "INTRADAY" | "SWING"', client)
+        self.assertIn('INTRADAY: emptyPlan("INTRADAY")', store)
+        self.assertIn('SWING: emptyPlan("SWING")', store)
+        self.assertIn('attachStream("INTRADAY"', store)
+        self.assertIn('attachStream("SWING"', store)
+        self.assertNotIn("runAnalysis(", store)
 
     def test_bse_decision_card_surfaces_structured_price_levels(self):
         card = (ROOT / "frontend" / "src" / "components" / "analysis" / "DecisionCard.tsx").read_text(encoding="utf-8")
