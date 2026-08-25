@@ -5,11 +5,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from backend.tradebrain.advisory_pipeline import evaluate_final_advisory
-from backend.tradebrain.equity_costs import calculate_equity_trade_costs
+from backend.tradebrain.equity_costs import calculate_equity_trade_costs, cost_profile
 from backend.tradebrain.exchange_calendar import ingest_nse_cash_holiday_payload
 from backend.tradebrain.policy import TradePlan, evaluate_trade_plan
 from backend.tradebrain.swing_mtf import calculate_swing_mtf_trade_costs
 from backend.tradebrain.trade_modes import product_boundary, to_swing_funding
+from tradingagents.default_config import DEFAULT_CONFIG
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -29,6 +30,20 @@ class TradeBrainMtfOnlyPolicyTests(unittest.TestCase):
         self.assertEqual(boundary["swing_funding_required"], "MTF")
         self.assertFalse(boundary["cnc_own_cash_active_swing_allowed"])
         self.assertIn("CNC_OWN_CASH", boundary["legacy_readable_swing_funding_labels"])
+
+    def test_default_agent_config_matches_mtf_only_product_boundary(self):
+        self.assertEqual(DEFAULT_CONFIG["swing_funding"], "ZERODHA_MTF_ONLY")
+        self.assertEqual(DEFAULT_CONFIG["swing_funding_modes"], ["MTF"])
+        self.assertEqual(DEFAULT_CONFIG["advisory_funding_modes"], ["MTF"])
+        self.assertFalse(DEFAULT_CONFIG["cnc_own_cash_active_swing_allowed"])
+        self.assertIn("CNC_OWN_CASH", DEFAULT_CONFIG["legacy_readable_swing_funding_modes"])
+
+    def test_base_equity_cost_profile_does_not_grant_own_cash_swing_permission(self):
+        profile = cost_profile()
+        self.assertFalse(profile["mtf_enabled"])
+        self.assertEqual(profile["component_scope"], "BASE_RESIDENT_EQUITY_TRANSACTION_COSTS_ONLY")
+        self.assertEqual(profile["swing_funding"], "NOT_APPLICABLE_BASE_COMPONENT")
+        self.assertNotEqual(profile["swing_funding"], "OWN_CASH_ONLY")
 
     def test_legacy_cnc_label_remains_readable_but_is_blocked_for_active_swing(self):
         self.assertEqual(to_swing_funding("CNC_OWN_CASH"), "CNC_OWN_CASH")
