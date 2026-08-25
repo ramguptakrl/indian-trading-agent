@@ -83,6 +83,22 @@ def update_env(path: Path, updates: dict[str, str]) -> None:
     path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
 
 
+def extract_request_token(value: str) -> str:
+    """Accept either the raw request_token or the complete redirect URL."""
+    raw = value.strip()
+    if not raw:
+        return ""
+    if "request_token=" in raw:
+        candidate = raw
+        if "://" not in candidate:
+            candidate = f"http://local/?{candidate.lstrip('?')}"
+        parsed = urllib.parse.urlparse(candidate)
+        token = urllib.parse.parse_qs(parsed.query).get("request_token", [""])[0].strip()
+        if token:
+            return token
+    return raw
+
+
 def _post_form(url: str, data: dict[str, str]) -> dict[str, Any]:
     encoded = urllib.parse.urlencode(data).encode("utf-8")
     request = urllib.request.Request(
@@ -159,7 +175,6 @@ def _audit_success(instrument: str, quote: dict[str, Any], env_path: Path) -> No
             source="scripts.tradebrain_kite_auth",
         )
     except Exception as exc:
-        # Authentication success must not be turned into failure by optional audit I/O.
         print(f"[warn] Session validated, but audit TXT write failed: {type(exc).__name__}")
 
 
@@ -185,8 +200,10 @@ def main() -> int:
 
     login_url = f"{KITE_LOGIN_URL}?{urllib.parse.urlencode({'v': '3', 'api_key': api_key})}"
     print("\n1) Complete the Zerodha login in your browser.")
-    print("2) After redirect, copy ONLY the request_token value from the URL.")
-    print("3) Paste that short-lived request_token below.\n")
+    print("2) After redirect, copy the ENTIRE address-bar URL (easiest), or only the request_token value.")
+    print("3) Return here, paste it at the hidden prompt, then press Enter.")
+    print("   Nothing will appear while you paste because the prompt is intentionally hidden.")
+    print("   If your redirect is http://127.0.0.1/ and the browser says it cannot connect, that is okay; copy the address bar anyway.\n")
     print(f"Login URL: {login_url}\n")
     if not args.no_browser:
         try:
@@ -194,9 +211,10 @@ def main() -> int:
         except Exception:
             pass
 
-    request_token = getpass.getpass("request_token (hidden): ").strip()
-    if not request_token:
-        print("request_token is required.", file=sys.stderr)
+    pasted = getpass.getpass("Paste redirect URL or request_token (hidden): ")
+    request_token = extract_request_token(pasted)
+    if len(request_token) < 10:
+        print("No valid request_token was pasted. Re-run the helper, complete a fresh Zerodha login, then paste the full redirected URL at the hidden prompt and press Enter.", file=sys.stderr)
         return 2
 
     checksum = hashlib.sha256(f"{api_key}{request_token}{api_secret}".encode("utf-8")).hexdigest()
