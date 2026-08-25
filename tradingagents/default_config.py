@@ -58,8 +58,10 @@ DEFAULT_CONFIG = {
     "mtf_research_and_cost_modeling_only": True,
     "funded_amount_modeled": True,
     "derivatives_enabled": False,
-    "swing_funding": "DYNAMIC_CNC_OR_MTF",
-    "swing_funding_modes": ["CNC_OWN_CASH", "MTF"],
+    "swing_funding": "ZERODHA_MTF_ONLY",
+    "swing_funding_modes": ["MTF"],
+    "legacy_readable_swing_funding_modes": ["CNC_OWN_CASH"],
+    "cnc_own_cash_active_swing_allowed": False,
     "mtf_to_cnc_same_purchase_day_allowed": False,
     "mtf_to_cnc_from": "T+1",
     "advisory_only": True,
@@ -95,7 +97,7 @@ DEFAULT_CONFIG = {
     "max_open_positions": 5,
     "require_stop_loss": True,
     "allowed_exchanges": ["NSE"],
-    # Broker order execution remains disabled; these are research/accounting labels.
-    "allowed_products": ["MIS", "CNC"],
-    "advisory_funding_modes": ["CNC_OWN_CASH", "MTF"],
+    # Research/accounting labels only. They do not enable any broker order route.
+    "allowed_products": ["MIS", "MTF"],
+    "advisory_funding_modes": ["MTF"],
 }
