@@ -1,8 +1,10 @@
-"""Observational Phase-6 smoke: live vendor data -> resident paper net economics.
+"""Observational Phase-6 smoke for the active BSE product economics boundary.
 
 This is a mechanics/transport test, not strategy-performance evidence. It uses recent
-BSE Ltd 5-minute vendor candles to create and close one synthetic INTRADAY paper
-position. No broker order API is used.
+BSE Ltd 5-minute vendor candles to:
+1) create/close one synthetic INTRADAY paper position with resident-equity costs; and
+2) calculate one explicit SWING Zerodha-MTF scenario with funded amount and interest.
+No broker order API is used.
 """
 
 from __future__ import annotations
@@ -24,12 +26,15 @@ from backend.tradebrain.equity_costs import cost_profile, data_credential_bounda
 from backend.tradebrain.identity import ExchangeListing
 from backend.tradebrain.market_data import sync_yahoo_history
 from backend.tradebrain.market_data_store import find_series, query_bars
+from backend.tradebrain.mtf_economics import mtf_rule_snapshot
 from backend.tradebrain.paper_ledger import (
     close_paper_position,
     create_paper_account,
     open_paper_position,
 )
 from backend.tradebrain.store import upsert_listing
+from backend.tradebrain.swing_mtf import calculate_swing_mtf_trade_costs
+from backend.tradebrain.trade_modes import product_boundary
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -37,11 +42,15 @@ IST = ZoneInfo("Asia/Kolkata")
 def main() -> int:
     report = {
         "sync": None,
-        "paper": None,
+        "intraday_paper": None,
+        "swing_mtf_scenario": None,
         "boundary": data_credential_boundary(),
-        "profile": None,
+        "base_equity_component": None,
+        "active_product_doctrine": product_boundary(),
+        "mtf_rules": mtf_rule_snapshot(),
         "errors": {},
         "performance_claim": False,
+        "broker_order_execution_used": False,
     }
     with tempfile.TemporaryDirectory() as tmp:
         os.environ["TRADEBRAIN_DATA_DIR"] = os.path.join(tmp, "tradebrain-data")
@@ -89,20 +98,24 @@ def main() -> int:
 
         entry_bar = usable[2]
         exit_bar = usable[7]
+        entry_price = float(entry_bar["open"])
+        exit_price = float(exit_bar["close"])
+        quantity = 10
+
         account = create_paper_account(name="PHASE6_LIVE_SMOKE", starting_cash=1_000_000, db_path=db_path)
         try:
             opened = open_paper_position(
                 account_id=account["account_id"], ticker="BSE", exchange="NSE",
-                mode="INTRADAY", direction="LONG", quantity=10,
-                entry_price=float(entry_bar["open"]), entry_timestamp=entry_bar["ts_open"],
+                mode="INTRADAY", direction="LONG", quantity=quantity,
+                entry_price=entry_price, entry_timestamp=entry_bar["ts_open"],
                 data_source="YAHOO_FINANCE_VIA_YFINANCE_LIVE_SMOKE",
                 db_path=db_path,
             )
             closed = close_paper_position(
-                position_id=opened["position_id"], exit_price=float(exit_bar["close"]),
+                position_id=opened["position_id"], exit_price=exit_price,
                 exit_timestamp=exit_bar["ts_close"], db_path=db_path,
             )
-            report["paper"] = {
+            report["intraday_paper"] = {
                 "position_id": closed["position_id"],
                 "mode": closed["mode"],
                 "direction": closed["direction"],
@@ -118,25 +131,80 @@ def main() -> int:
                 "synthetic_from_observed_history": True,
             }
         except Exception as exc:
-            report["errors"]["paper"] = f"{type(exc).__name__}: {exc}"
+            report["errors"]["intraday_paper"] = f"{type(exc).__name__}: {exc}"
 
+        try:
+            entry_notional = entry_price * quantity
+            funded_amount = round(entry_notional * 0.50, 2)
+            economics = calculate_swing_mtf_trade_costs(
+                exchange="NSE",
+                entry_price=entry_price,
+                exit_price=exit_price,
+                quantity=quantity,
+                funded_amount=funded_amount,
+                interest_days=2,
+                purchase_date_count=1,
+                rms_squareoff_orders=0,
+            )
+            report["swing_mtf_scenario"] = {
+                "mode": "SWING",
+                "direction": "LONG",
+                "swing_funding": "MTF",
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "quantity": quantity,
+                "entry_notional": round(entry_notional, 2),
+                "funded_amount": economics["funded_amount"],
+                "user_cash_contribution": economics["user_cash_contribution"],
+                "interest_days": economics["mtf_interest_days"],
+                "mtf_interest": economics["funding_interest"],
+                "mtf_incremental_total": economics["charges"]["mtf_incremental_total"],
+                "total_charges": economics["charges"]["total"],
+                "gross_pnl": economics["gross_pnl"],
+                "net_pnl": economics["net_pnl"],
+                "break_even_exit_price": economics["break_even_exit_price"],
+                "mtf_profile_key": economics["mtf_profile_key"],
+                "mtf_used": economics["mtf_used"],
+                "synthetic_from_observed_history": True,
+                "performance_claim": False,
+            }
+        except Exception as exc:
+            report["errors"]["swing_mtf_scenario"] = f"{type(exc).__name__}: {exc}"
+
+        # Keep the resident-equity engine visible, but label it correctly as the base
+        # transaction-cost component rather than the active SWING funding doctrine.
         profile = cost_profile()
-        report["profile"] = {
+        report["base_equity_component"] = {
             "profile_key": profile["profile_key"],
             "trader_profile": profile["trader_profile"],
             "active_modes": profile["active_modes"],
-            "mtf_enabled": profile["mtf_enabled"],
-            "swing_funding": profile["swing_funding"],
+            "mtf_enabled_in_this_base_component": profile["mtf_enabled"],
+            "legacy_swing_funding_label": profile["swing_funding"],
+            "meaning": "Base resident-equity transaction-cost component only; active SWING funding doctrine is MTF_ONLY.",
         }
+
+        intraday = report.get("intraday_paper") or {}
+        swing = report.get("swing_mtf_scenario") or {}
+        doctrine = report["active_product_doctrine"]
         report["live_phase6_success"] = bool(
             report.get("sync") and report["sync"].get("rows_received", 0) > 0
-            and report.get("paper") and report["paper"].get("status") == "CLOSED"
-            and report["paper"].get("mode") == "INTRADAY"
-            and report["paper"].get("financing_interest") == 0
-            and report["paper"].get("mtf_used") is False
-            and report["paper"].get("funded_amount") == 0
+            and intraday.get("status") == "CLOSED"
+            and intraday.get("mode") == "INTRADAY"
+            and intraday.get("financing_interest") == 0
+            and intraday.get("mtf_used") is False
+            and intraday.get("funded_amount") == 0
+            and swing.get("mode") == "SWING"
+            and swing.get("swing_funding") == "MTF"
+            and swing.get("mtf_used") is True
+            and float(swing.get("funded_amount") or 0) > 0
+            and float(swing.get("mtf_interest") or 0) > 0
+            and swing.get("interest_days") == 2
+            and doctrine.get("active_swing_funding_modes") == ["MTF"]
+            and doctrine.get("swing_funding_required") == "MTF"
+            and doctrine.get("mtf_broker_order_execution_enabled") is False
             and report["boundary"].get("trader_profile") == "RESIDENT_INDIAN"
             and report["boundary"].get("order_api_enabled") is False
+            and report["broker_order_execution_used"] is False
         )
         print(json.dumps(report, indent=2, sort_keys=True, default=str))
         return 0 if report["live_phase6_success"] and not report["errors"] else 2
