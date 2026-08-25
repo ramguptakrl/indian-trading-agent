@@ -1,274 +1,232 @@
 # Trade Brain — BSE Ltd Product Conversion Audit
 
+Status: **conversion complete through Trade Brain v0.13.0**  
 Canonical branch: `tradebrain/reframe-foundation`  
-Control/baseline branch: `main` (original ITA; keep untouched)  
-Target tradable instrument: **BSE Ltd (`NSE:BSE`, ISIN `INE118H01025`)**
+Control/baseline branch: `main` (original inherited ITA; keep untouched)  
+Only tradable target: **BSE Ltd (`NSE:BSE`, ISIN `INE118H01025`)**
 
 ## Product decision
 
 Trade Brain is no longer a generic multi-stock Indian trading application on this branch.
-It is a BSE Ltd decision-support and evidence system.
+It is a BSE Ltd decision-support, evidence, replay and validation system.
 
-Only BSE Ltd may be a trade target. Broader Indian/global market information may remain
-only when it is useful context for a BSE Ltd decision.
+Broader Indian/global market information is context only. It cannot become an independent
+trade target through the active product surface.
 
-The user-facing question is:
+Every final result remains non-executing:
 
-> What is the current BSE Ltd posture for INTRADAY and SWING, at what entry, stop and
-> primary target, under what evidence/risk conditions, and why?
+```text
+advisory_only = true
+trade_authorization = false
+order_execution_allowed = false
+```
 
-Trade Brain remains advisory-only. No broker order endpoint is permitted.
+## Canonical decision question
 
-## Canonical BSE output contract
+For BSE Ltd only:
 
-Every actionable research candidate must expose explicit structured geometry rather than
-only a generic BUY/SELL label:
+- what is the current INTRADAY posture?
+- what is the current SWING · Zerodha-MTF posture?
+- what Entry / Stop-Loss / Primary Target geometry exists?
+- what evidence supports or blocks the candidate?
+- are the data, exchange session, market risk and broker/funding state sufficiently verified?
 
-- instrument: BSE Ltd / `NSE:BSE`
-- India market date and evaluation timestamp in IST
-- trade mode: `INTRADAY` or `SWING`
-- direction: `LONG` or `SHORT` (SWING remains LONG-only)
-- final status: candidate / wait / blocked / exit
-- entry price (or future explicitly modeled entry zone)
-- stop-loss
-- primary take-profit
-- gross reward/risk
-- net-of-modeled-cost scenario when quantity is known
-- evidence/provenance and blocking reasons
-- data freshness/source
-- advisory-only / no-order-authorization markers
+If valid geometry/evidence does not exist, the correct result is WAIT/BLOCK rather than an
+invented price or forced trade.
 
-Do not display a second target until a tested deterministic T2 model exists. The current
-backend contract contains one `take_profit`, so the UI must call it **Primary Target**.
+## Canonical active modes
 
-## KEEP — canonical Trade Brain core
+### INTRADAY
 
-The following areas are part of the BSE product and should remain, subject to normal
-refactoring/deduplication:
+- LONG or SHORT cash equity;
+- same session only;
+- no fresh entry from 15:10 IST;
+- flat before 15:15 IST.
 
-### Evidence, identity and market data
-- `backend/tradebrain/identity.py`
-- `backend/tradebrain/security_master.py`
-- `backend/tradebrain/security_store.py`
-- `backend/tradebrain/provenance.py`
-- `backend/tradebrain/corporate_events.py`
-- `backend/tradebrain/corporate_event_store.py`
-- `backend/tradebrain/documents.py`
-- `backend/tradebrain/market_data.py`
-- `backend/tradebrain/market_data_store.py`
-- `backend/tradebrain/market_source_policy.py`
-- `backend/tradebrain/kite_data.py`
-- `backend/tradebrain/kite_history_range.py`
-- `backend/tradebrain/kite_stream.py`
+### SWING
 
-### Research validation and learning
-- `backend/tradebrain/replay.py`
-- `backend/tradebrain/evidence_baseline.py`
-- `backend/tradebrain/exploratory_studies.py`
-- `backend/tradebrain/focus_lab.py`
-- `backend/tradebrain/focus_lab_store.py`
-- `backend/tradebrain/challenger.py`
-- `backend/tradebrain/challenger_store.py`
-- `backend/tradebrain/prospective_gap.py`
-- `backend/tradebrain/soft_evidence.py`
-- `backend/tradebrain/soft_runtime.py`
-- `backend/tradebrain/study_cycle.py`
-- sanitized TXT audit/learning files
+- LONG only;
+- multi-day;
+- active funding is **Zerodha MTF only**;
+- verified MTF eligibility required;
+- funded amount explicit;
+- explicit interest-days scenario required for complete net-cost evaluation.
 
-### Decision/safety/accounting
-- `backend/tradebrain/policy.py`
-- `backend/tradebrain/advisory_pipeline.py`
-- `backend/tradebrain/advisory_store.py`
-- `backend/tradebrain/exchange_calendar.py`
-- `backend/tradebrain/regime_hardening.py`
-- `backend/tradebrain/schedule.py`
-- `backend/tradebrain/trade_modes.py`
-- `backend/tradebrain/equity_costs.py`
-- `backend/tradebrain/paper_ledger.py`
-- `backend/tradebrain/actual_trade_journal.py`
-- `backend/tradebrain/llm_failover.py`
+MTF is funding, not a third trade mode. Historical CNC labels may remain readable only for
+compatibility/audit.
 
-### Required operational surfaces
-- Windows launcher / Kite auth helpers
-- Settings for local Gemini/Groq credentials
-- Actual Trades journal
-- audited BSE chart/history
-- BSE analysis result/details
+## Canonical AI roles
 
-## CONVERT — useful capability, wrong generic product framing
+- **Groq** is the normal primary research/synthesis provider when configured.
+- **Gemini** is the independent material-finding verifier/challenger when configured.
+- retryable capacity/quota failover is supported between configured providers.
+- AI never grants broker, session, risk or funding permission.
 
-These capabilities should survive only after becoming BSE-centric:
+## Conversion status — completed
 
-### Multi-agent analysis
-Current generic ticker selection becomes fixed BSE Ltd analysis. The analyst graph remains
-useful as a research input, but its prompts/tools must focus on BSE Ltd and treat broader
-market data as context rather than independent recommendations.
+### BSE-only scope
 
-### Dashboard / market context
-Keep relevant macro/context signals such as:
-- NIFTY / broad market direction
-- BANK NIFTY / financial-market context where empirically useful
-- India VIX / volatility regime
-- market breadth/liquidity context
-- FII/DII only as contextual evidence, not a direct BSE trade trigger without evidence
-- exchange/regulatory/company-specific news
-- BSE corporate actions/results/events
-- relevant global risk cues
+Completed:
 
-The dashboard must become **BSE Today**, not a general market discovery page.
+- fixed BSE instrument contract;
+- request-model BSE validation;
+- dual-horizon BSE analysis;
+- shared live-advisory BSE/NSE scope lock;
+- no generic ticker search in active BSE Analysis;
+- BSE-only frontend route contract.
 
-### Performance / insights / calibration
-Merge overlapping generic validation screens into a BSE evidence workspace built around the
-canonical replay, prospective evidence, challenger and actual-trade data. Legacy metrics may
-be retained only when their methodology is compatible and clearly labeled.
+### Generic ITA product surfaces
 
-### News
-Filter/rank toward BSE Ltd, Indian capital markets/exchange structure, regulation, market
-activity and other evidence shown to matter for BSE. Generic RSS browsing is secondary.
+Disconnected/removed from the active frontend:
 
-## REMOVE FROM PRODUCT SURFACE — generic ITA concepts
+- Top Picks;
+- generic Market Scan;
+- watchlist/discovery pages;
+- generic AI backtest/simulation pages;
+- verdict/calibration pages;
+- shadow-trade page;
+- strategy catalog entry points;
+- memory-admin trading navigation.
 
-These should disappear from normal Trade Brain navigation immediately. Physical code deletion
-comes only after imports/tests prove they are dead:
+The active browser surface is:
 
-- Top Picks / generic multi-stock recommender
-- generic market scanner as a trade-finding tool
-- generic watchlist
-- generic stock/ticker search for Deep Analysis
-- generic strategy catalog as independent tradable-stock strategies
-- generic sector heatmap as a discovery surface
-- generic AI multi-stock backtest UI
-- generic multi-stock simulation UI
-- legacy signal-performance UI when superseded by audited BSE evidence
-- legacy verdict-calibration UI when superseded by audited BSE evidence
-- shadow-trade UI unless its counterfactual method is explicitly migrated into BSE evidence
-- memory-admin as a day-to-day trading navigation item
+- BSE Today;
+- BSE Analysis;
+- Analysis detail;
+- Price & Structure;
+- Analysis Outcomes;
+- BSE Evidence;
+- BSE Context / News;
+- Actual Trades;
+- Settings.
 
-## Candidate physical deletion after dependency audit
+Generic backend files may remain only where unmounted or deliberately reused as underlying
+research infrastructure. They are not active multi-stock trade-discovery routes.
 
-The following legacy modules are candidates for removal or isolation after the BSE routes no
-longer import them. Do not delete them merely by filename; prove no canonical BSE dependency
-first:
+## Canonical evidence/data plane
 
-- `backend/backtest_engine.py`
-- `backend/recommender.py`
-- `backend/scanner.py`
-- `backend/stock_list.py`
-- generic `backend/simulation.py`
-- generic `backend/shadow_trades.py`
-- generic `backend/signal_performance.py`
-- generic `backend/verdict_calibration.py`
-- generic `backend/confidence_calibration.py`
-- generic watchlist/recommender/scanner/backtest/simulation routers
-- corresponding generic frontend routes/components
-- optional unused data-vendor/provider adapters after import/dependency audit
+Retained and converted capabilities include:
 
-## Target frontend information architecture
+- official identity/security-master handling;
+- provenance;
+- permanent corporate-event/document memory;
+- audited RAW_UNADJUSTED OHLCV;
+- explicit stock-split price eras;
+- dividend ex-date economic context;
+- point-in-time replay;
+- multi-timeframe structure/regime/gap/volume research;
+- Focus Instrument Lab;
+- frozen challenger/walk-forward governance;
+- prospective evidence;
+- verified exchange calendar;
+- Crash Guard / market guards;
+- Kite read-only historical/quote/WebSocket data;
+- context-only audited NIFTY 50 store;
+- after-market study cycle.
 
-### 1. BSE Today
-The first screen should answer the decision question without asking for a ticker.
+## Canonical market-data hierarchy
 
-Top block:
-- BSE Ltd live/last price and source/freshness
-- market/session state in IST
-- explicit data state: LIVE / STALE / CLOSED / FALLBACK
+When locally authenticated:
 
-Decision block — two clearly separate cards:
+```text
+Kite Historical REST -> audited finalized BSE history
+Kite WebSocket        -> fresh persisted live BSE quote/depth state
+Kite REST Quote       -> on-demand market-data snapshot
+```
 
-**INTRADAY**
-- LONG / SHORT / WAIT / BLOCKED
-- Entry
-- Stop
-- Primary Target
-- R:R
-- session cutoff/validity
-- key evidence and blockers
+Yahoo/yfinance is explicitly labelled fallback/research data only where permitted. It is
+not silently upgraded to official/Kite evidence.
 
-**SWING**
-- LONG / WAIT / BLOCKED / EXIT
-- Entry
-- Stop
-- Primary Target
-- R:R
-- event/corporate-risk context
-- key evidence and blockers
+No Kite place/modify/cancel-order method exists.
 
-If no valid geometry exists, show `WAIT / NO VALID LEVELS` rather than inventing prices.
+## Corporate-action hardening
 
-### 2. BSE Analysis
-- BSE fixed; no ticker search
-- Analysis Date is India/IST date
-- multi-agent research visible as supporting detail
-- structured BSE decision card is primary output
-- Gemini primary with Groq retryable-failure fallback
+Completed:
 
-### 3. BSE Price & Structure
-- audited Kite candles/history
-- support/resistance/volume/gap/regime evidence
-- source + timestamp + comparable-price-era treatment
+- REVIEWED/ARCHIVED inbox state no longer removes official truth from risk/replay readers;
+- explicit record/ex/payment dates are normalized when stated;
+- an ex-date is never inferred from a record date;
+- full month names such as `September` are preserved during date normalization;
+- split ratios are explicit-only;
+- stock splits create raw-price comparability boundaries without rewriting OHLC;
+- replay and Guardian avoid treating a mechanical split reset as an ordinary loss/stop;
+- dividends remain economic context rather than structural split eras.
 
-### 4. BSE Context
-- broader market/regulatory/news inputs that may support or weaken a BSE decision
-- every item explicitly labeled as context, not a trade target
+## Costs / SWING MTF conversion
 
-### 5. BSE Evidence
-- replay/backtest outcomes
-- prospective frozen hypotheses
-- challenger evidence
-- calibration only where methodology is valid
-- after-market study status
-- actual-vs-advisory outcome summaries
+Completed:
 
-### 6. Actual Trades
-Manual record of trades the human actually executed externally.
+- resident base equity transaction-cost component;
+- separate versioned Zerodha MTF incremental funding component;
+- combined SWING MTF target/stop/break-even economics;
+- explicit funded amount / user contribution separation;
+- explicit interest-day handling;
+- funding-aware MTF paper ledger;
+- strict MTF replay;
+- MTF-aware Actual Trades estimates and partial closes.
 
-### 7. Settings
-Local provider credentials, operating timezone display preference and non-secret configuration.
+The base cost component no longer claims own-cash SWING funding permission. Active funding
+permission comes from Trade Brain policy and is MTF-only.
 
-## Code-deletion rule
+## Actual Trades / Guardian conversion
 
-Use three stages:
+Completed:
 
-1. **Hide / disconnect** generic ITA product surfaces from BSE runtime/navigation.
-2. Run Foundation + Windows + Security + BSE regression tests.
-3. Delete proven-dead files and run the full suite again.
+- actual human fill journal remains separate from replay/paper evidence;
+- advisory linkage and mismatch preservation;
+- partial closes;
+- MTF metadata/economics for active SWING;
+- read-only Guardian surfaced on Actual Trades;
+- local event/news/corporate-action/correction context;
+- audited NIFTY correction context when available;
+- fresh-quote requirement before live stop/target/HOLD interpretation;
+- stale/malformed/missing live quote fails closed.
 
-This avoids breaking useful inherited utilities while still producing a genuinely BSE-only
-application.
+## Validation conversion
 
-## Original ITA comparison after Trade Brain completion
+Foundation now runs:
 
-The original ITA baseline remains frozen on `main`. Do not back-port Trade Brain logic into
-that branch before the benchmark.
+```text
+python -m pytest -q tests/test_tradebrain_*.py
+```
 
-A fair comparison should use the same BSE dates and information cutoffs and should prevent
-look-ahead leakage. Suggested measures:
+This executes both `unittest.TestCase` and pytest-style Trade Brain modules. The old
+`unittest discover` runner silently skipped several pytest-style files and is no longer the
+canonical regression gate.
 
-- analysis completion/failure rate
-- structured-level completeness (mode/entry/SL/target)
-- directional/outcome accuracy under one harmonized scoring rule
-- net-of-cost result under identical execution assumptions where simulation is valid
-- max drawdown / adverse excursion
-- abstention quality (`WAIT` when evidence is weak)
-- data provenance/look-ahead violations
-- hard-rule/session violations
-- latency
-- LLM calls/tokens/cost
-- provider-quota resilience
+Second full audit validation on 2026-08-25 passed **243 tests + 5 subtests** before the
+observational Phase 2/3/4/5/6/10 smokes.
 
-Do not compare a raw ITA BUY/SELL string to a Trade Brain advisory as if they were equivalent.
-Both systems need a frozen evaluation adapter and identical outcome definitions.
+## Benchmark boundary vs original ITA
 
-## Immediate conversion sequence
+The original baseline remains on `main`. Do not back-port Trade Brain logic there before a
+controlled benchmark.
 
-1. Add a central BSE-only scope contract and reject non-BSE analysis requests.
-2. Remove ticker selection from BSE Analysis.
-3. Surface mode/direction/Entry/SL/Primary Target/R:R in the main decision card.
-4. Replace the generic sidebar with BSE Today / Analysis / Price & Structure / Context /
-   Evidence / Actual Trades / Settings.
-5. Convert dashboard from market-discovery to BSE Today.
-6. Consolidate validation/evidence pages.
-7. Disconnect generic backend routers.
-8. Prove dead code, then delete it.
-9. Update canonical project docs and freeze a BSE v1 benchmark candidate.
-10. Run the controlled BSE Trade Brain vs original ITA benchmark.
+Any future comparison must use identical BSE dates/information cutoffs and harmonized
+outcome definitions. A raw ITA BUY/SELL string is not equivalent to a Trade Brain
+fail-closed structured advisory.
+
+Useful benchmark dimensions include:
+
+- analysis completion/failure rate;
+- structured-level completeness;
+- directional/outcome accuracy under one frozen scoring rule;
+- net-of-cost performance under identical valid execution assumptions;
+- max adverse excursion/drawdown;
+- abstention quality;
+- provenance/look-ahead violations;
+- hard-rule/session violations;
+- latency and provider cost/resilience.
+
+## Remaining work is operational, not conversion architecture
+
+Before real advisory use:
+
+1. configure local Groq/Gemini credentials;
+2. authenticate local Kite market data;
+3. launch the Windows software;
+4. verify real BSE history/quote/WebSocket and optional NIFTY context locally;
+5. run the first real dual-horizon advisory with execution OFF;
+6. continue untouched prospective evidence collection.
+
+PR #1 remains **OPEN / DRAFT / UNMERGED** until the owner explicitly asks otherwise.
