@@ -4,7 +4,6 @@ from tradingagents.horizon_policy import horizon_instruction
 
 def create_portfolio_manager(llm, memory, requested_trade_mode: str | None = None):
     def portfolio_manager_node(state) -> dict:
-
         instrument_context = build_instrument_context(state["company_of_interest"])
 
         history = state["risk_debate_state"]["history"]
@@ -15,6 +14,7 @@ def create_portfolio_manager(llm, memory, requested_trade_mode: str | None = Non
         sentiment_report = state["sentiment_report"]
         research_plan = state["investment_plan"]
         trader_plan = state["trader_investment_plan"]
+        multi_timeframe_context = str(state.get("multi_timeframe_context") or "AUDITED MULTI-TIMEFRAME CONTEXT: unavailable")
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
         past_memories = memory.get_memories(curr_situation, n_matches=2)
@@ -29,6 +29,9 @@ def create_portfolio_manager(llm, memory, requested_trade_mode: str | None = Non
 {instrument_context}
 
 {horizon_context}
+
+**Deterministic audited D→4H→1H→15m evidence (same snapshot supplied to Trader):**
+{multi_timeframe_context}
 
 ---
 
@@ -61,7 +64,7 @@ The modeled trader is RESIDENT_INDIAN. A broker/Kite credential may later provid
 - A market crash signal does NOT automatically create a SHORT.
 
 **Technical evidence hierarchy**
-When audited values are supplied, use the canonical sequence: 1D dominant trend/regime -> derived 4H structure -> 1H setup -> 15m entry refinement. Do not invent missing timeframe values. Gap/candlestick/FVG evidence remains research context until validated.
+Use the supplied deterministic audited sequence: 1D dominant trend/regime -> derived 4H structure -> 1H setup -> 15m entry refinement. Do not invent missing timeframe values. If its status is `MISSING_AUDITED_SERIES`, `INCOMPLETE_TIMEFRAME_EVIDENCE`, or `PRICE_COMPARABILITY_BLOCK`, preserve that limitation and prefer HOLD / WAIT or NO TRADE when material. Gap/candlestick/FVG evidence remains research context until validated.
 
 **Soft / learnable information**
 Levels, regimes, volume, indicators, analogues, relative-market context, and signal weights are evidence. Do not call provisional weights or score-derived probabilities "learned" unless supplied data demonstrates out-of-sample calibration.
