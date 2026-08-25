@@ -3,13 +3,16 @@
 
 Default behavior is one cycle. Use --loop to leave a lightweight local supervisor
 running; it checks the exchange-aware operating mode and executes at most once per IST
-date after market close/non-trading study mode.
+date after market close/non-trading study mode. Loop mode uses a local singleton lock so
+restarting the UI cannot accidentally create duplicate study supervisors.
 """
 
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -21,6 +24,67 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.tradebrain.study_cycle_v2 import run_after_market_study_v2
+
+
+def _data_root() -> Path:
+    configured = os.getenv("TRADEBRAIN_DATA_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".tradingagents" / "tradebrain"
+
+
+def _supervisor_lock_path() -> Path:
+    root = _data_root()
+    root.mkdir(parents=True, exist_ok=True)
+    return root / "after_market_study_supervisor.lock"
+
+
+def _pid_is_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _acquire_supervisor_lock() -> tuple[bool, int | None, Path]:
+    """Acquire an atomic PID lock for --loop mode, removing only a proven stale lock."""
+    path = _supervisor_lock_path()
+    if path.exists():
+        try:
+            existing_pid = int(path.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            existing_pid = -1
+        if _pid_is_running(existing_pid):
+            return False, existing_pid, path
+        try:
+            path.unlink()
+        except OSError:
+            return False, existing_pid if existing_pid > 0 else None, path
+
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        try:
+            existing_pid = int(path.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            existing_pid = None
+        return False, existing_pid, path
+
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(str(os.getpid()))
+
+    def cleanup() -> None:
+        try:
+            if path.exists() and path.read_text(encoding="utf-8").strip() == str(os.getpid()):
+                path.unlink()
+        except OSError:
+            pass
+
+    atexit.register(cleanup)
+    return True, os.getpid(), path
 
 
 def _reload_env() -> None:
@@ -70,6 +134,25 @@ def main() -> int:
     if args.poll_seconds < 60:
         parser.error("--poll-seconds must be at least 60")
 
+    if args.loop:
+        acquired, existing_pid, lock_path = _acquire_supervisor_lock()
+        if not acquired:
+            print(json.dumps({
+                "status": "SUPERVISOR_ALREADY_RUNNING",
+                "existing_pid": existing_pid,
+                "lock_path": str(lock_path),
+                "order_execution_allowed": False,
+            }))
+            return 0
+        print(json.dumps({
+            "status": "SUPERVISOR_STARTED",
+            "pid": os.getpid(),
+            "lock_path": str(lock_path),
+            "poll_seconds": args.poll_seconds,
+            "order_execution_allowed": False,
+        }))
+        sys.stdout.flush()
+
     last_console_signature = None
     while True:
         _reload_env()
@@ -91,7 +174,6 @@ def main() -> int:
         if not args.loop:
             okay = {"SUCCESS", "SUCCESS_WITH_RESEARCH_WARNINGS", "ALREADY_COMPLETED_TODAY", "SKIPPED_NOT_STUDY_TIME"}
             return 0 if result.get("status") in okay else 1
-        # --force in loop mode deliberately applies only to the first pass.
         args.force = False
         time.sleep(args.poll_seconds)
 
