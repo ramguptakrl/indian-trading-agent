@@ -2,6 +2,10 @@
 setlocal
 cd /d "%~dp0"
 
+rem Keep standalone study output UTF-8-safe on Windows as well.
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
+
 if not exist "%~dp0venv\Scripts\python.exe" (
   echo Trade Brain Python environment is not ready.
   echo Run Start-TradeBrain.bat -SetupOnly first.
