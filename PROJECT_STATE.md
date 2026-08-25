@@ -26,28 +26,38 @@ All of those findings were corrected without enabling broker execution.
 
 ## Current regression validation
 
-Foundation run **#665** (`32900437853`) on code commit
-`f4f8d7b8beaba5317c9a37b69a7214f1f1f17b98` passed:
+The fully audited runtime code commit is:
 
-- **243 tests passed**;
-- **5 subtests passed**;
-- Python integration compile ✅;
-- launcher syntax validation ✅;
-- production frontend contract/build ✅;
-- Phase 2 corporate-event/document smoke ✅ observational;
-- Phase 3 market-data/replay smoke ✅ observational;
-- Phase 4 strict outcome/Focus Lab smoke ✅ observational;
-- Phase 5 challenger smoke ✅ observational;
-- Phase 6 INTRADAY + SWING MTF economics smoke ✅ observational;
-- Phase 10 calendar/final-advisory smoke ✅ observational;
-- descriptive BSE evidence baseline rebuilt/uploaded ✅.
+`f4f8d7b8beaba5317c9a37b69a7214f1f1f17b98`
+
+On that code line:
+
+- Trade Brain Foundation run **#665** (`32900437853`) ✅
+- Trade Brain Windows run **#275** (`32900438029`) ✅
+- Trade Brain Security ✅
+- Trade Brain Dependency Refresh ✅
+- **243 tests passed** ✅
+- **5 subtests passed** ✅
+- Python integration compile ✅
+- launcher syntax validation ✅
+- production frontend contract/build ✅
+- Windows PowerShell parse / prerequisite preflight / BAT wrapper ✅
+- Windows clean first-run backend + frontend end-to-end health smoke ✅
+- Phase 2 corporate-event/document smoke ✅ observational
+- Phase 3 market-data/replay smoke ✅ observational
+- Phase 4 strict outcome/Focus Lab smoke ✅ observational
+- Phase 5 challenger smoke ✅ observational
+- Phase 6 INTRADAY + SWING MTF economics smoke ✅ observational
+- Phase 10 calendar/final-advisory smoke ✅ observational
+- descriptive BSE evidence baseline rebuilt/uploaded ✅
 
 The regression runner is now **pytest over every `tests/test_tradebrain_*.py` module**. This executes
 both `unittest.TestCase` suites and pytest-style top-level tests; the old 201-test count was
 incomplete and must not be used as the current coverage claim.
 
-Security and Dependency Refresh also passed on the same code line. Windows validation is
-tracked separately and must be green on the final runtime code before local handoff is called complete.
+Commits after the audited runtime SHA are documentation-only alignment updates. No Python,
+TypeScript, workflow, launcher, dependency or trading-policy code changed after the four-gate
+runtime validation.
 
 A passing software suite supports tested code/contract correctness. It is not a profitability claim.
 
@@ -245,17 +255,16 @@ The generic ITA scanner/recommender/backtest/simulation/calibration/strategy/sha
 
 ## What remains before real advisory use
 
-The framework/code integration is not the current blocker. Remaining work is operational/local:
+The framework/code integration is no longer the blocker. Remaining work is operational/local:
 
-1. confirm the final Windows CI smoke on the audited runtime line;
-2. configure local Groq and Gemini keys;
-3. configure local Kite API credentials without committing secrets;
-4. complete local Kite access-token authentication;
-5. launch `Start-TradeBrain.bat` on the Windows machine;
-6. verify backend/frontend health locally;
-7. verify real authenticated BSE historical/quote/WebSocket data and optional NIFTY context;
-8. run the first real BSE dual-horizon advisory with execution still OFF;
-9. continue untouched prospective evidence collection.
+1. configure local Groq and Gemini keys;
+2. configure local Kite API credentials without committing secrets;
+3. complete local Kite access-token authentication;
+4. launch `Start-TradeBrain.bat` on the Windows machine;
+5. verify backend/frontend health locally;
+6. verify real authenticated BSE historical/quote/WebSocket data and optional NIFTY context;
+7. run the first real BSE dual-horizon advisory with execution still OFF;
+8. continue untouched prospective evidence collection.
 
 GitHub CI intentionally has no private broker/LLM credentials, so it cannot claim authenticated local success.
 
