@@ -5,6 +5,8 @@ V2 preserves the tested V1 daily/5m bootstrap/replay/prospective cycle, then add
 - audited 60m history
 - D -> derived 4H -> 1H -> 15m research snapshot
 - research-only candlestick/FVG studies
+- research-only Fibonacci and candle-volume-at-price proxy features
+- point-in-time BSE/India news memory from first observation forward
 
 Nothing in this module can modify hard policy, promote a soft parameter automatically,
 or place/modify/cancel a broker order.
@@ -24,8 +26,10 @@ from backend.tradebrain.audit_txt import audit_learning
 from backend.tradebrain.kite_data import KiteDataOnlyClient
 from backend.tradebrain.kite_history_range import sync_kite_history_range
 from backend.tradebrain.multi_timeframe import multi_timeframe_snapshot
+from backend.tradebrain.news_archive import archive_current_bse_context_news
 from backend.tradebrain.pattern_lab import pattern_lab_study
 from backend.tradebrain.schedule import get_operating_mode
+from backend.tradebrain.structure_lab import structure_lab_snapshot
 from backend.tradebrain.study_cycle import (
     ALLOWED_STUDY_MODES,
     DEFAULT_BOOTSTRAP_5M_DAYS,
@@ -35,7 +39,7 @@ from backend.tradebrain.study_cycle import (
 )
 
 IST = ZoneInfo("Asia/Kolkata")
-METHOD_VERSION = "AFTER_MARKET_STUDY_V2_MTF_PATTERN"
+METHOD_VERSION = "AFTER_MARKET_STUDY_V2_MTF_PATTERN_CONTEXT"
 DEFAULT_BOOTSTRAP_15M_DAYS = DEFAULT_BOOTSTRAP_5M_DAYS
 DEFAULT_BOOTSTRAP_60M_DAYS = DEFAULT_BOOTSTRAP_5M_DAYS
 
@@ -91,7 +95,7 @@ def _history_summary(result: dict[str, Any]) -> dict[str, Any]:
 def _safe_research(callable_obj, *args, **kwargs) -> dict[str, Any]:
     try:
         return {"status": "SUCCESS", "result": callable_obj(*args, **kwargs)}
-    except Exception as exc:  # research add-ons must not erase successful audited sync
+    except Exception as exc:
         return {
             "status": "RESEARCH_WARNING",
             "error_type": type(exc).__name__,
@@ -147,9 +151,6 @@ def run_after_market_study_v2(
             "order_execution_allowed": False,
         }
 
-    # Preserve the tested V1 foundation. It may return ALREADY_COMPLETED_TODAY when a
-    # previous V1 run succeeded before V2 was installed; V2 should still add its new
-    # datasets/research in that case.
     base = run_after_market_study(
         now=current,
         force=force,
@@ -191,24 +192,14 @@ def run_after_market_study_v2(
         instrument = client.resolve_equity_instrument("NSE", "BSE")
         token = int(instrument["instrument_token"])
         history_15m = sync_kite_history_range(
-            exchange="NSE",
-            symbol="BSE",
-            interval="15minute",
-            from_time=current - timedelta(days=days_15m),
-            to_time=current,
-            instrument_token=token,
-            client=client,
-            db_path=db_path,
+            exchange="NSE", symbol="BSE", interval="15minute",
+            from_time=current - timedelta(days=days_15m), to_time=current,
+            instrument_token=token, client=client, db_path=db_path,
         )
         history_60m = sync_kite_history_range(
-            exchange="NSE",
-            symbol="BSE",
-            interval="60minute",
-            from_time=current - timedelta(days=days_60m),
-            to_time=current,
-            instrument_token=token,
-            client=client,
-            db_path=db_path,
+            exchange="NSE", symbol="BSE", interval="60minute",
+            from_time=current - timedelta(days=days_60m), to_time=current,
+            instrument_token=token, client=client, db_path=db_path,
         )
         series_id = history_15m.get("series_id") or history_60m.get("series_id") or base.get("series_id")
         if not series_id:
@@ -218,12 +209,22 @@ def run_after_market_study_v2(
         mtf = _safe_research(multi_timeframe_snapshot, series_id, as_of=as_of, db_path=db_path)
         patterns_15m = _safe_research(pattern_lab_study, series_id, as_of=as_of, db_path=db_path, interval="15m")
         patterns_daily = _safe_research(pattern_lab_study, series_id, as_of=as_of, db_path=db_path, interval="1d")
+        structure = _safe_research(structure_lab_snapshot, series_id, as_of=as_of, db_path=db_path)
+        news_memory = _safe_research(
+            archive_current_bse_context_news,
+            max_per_source=4,
+            observed_at=current,
+            db_path=db_path,
+        )
 
-        warnings = [
-            name
-            for name, result in (("multi_timeframe", mtf), ("patterns_15m", patterns_15m), ("patterns_daily", patterns_daily))
-            if result.get("status") != "SUCCESS"
-        ]
+        named_research = (
+            ("multi_timeframe", mtf),
+            ("patterns_15m", patterns_15m),
+            ("patterns_daily", patterns_daily),
+            ("structure_lab", structure),
+            ("news_memory", news_memory),
+        )
+        warnings = [name for name, item in named_research if item.get("status") != "SUCCESS"]
         final_status = "SUCCESS" if not warnings else "SUCCESS_WITH_RESEARCH_WARNINGS"
         result = {
             "status": final_status,
@@ -245,6 +246,8 @@ def run_after_market_study_v2(
             "multi_timeframe": mtf,
             "pattern_lab_15m": patterns_15m,
             "pattern_lab_daily": patterns_daily,
+            "structure_lab": structure,
+            "news_memory": news_memory,
             "research_warnings": warnings,
             "api_governor": KITE_API_GOVERNOR.snapshot(),
             "learning_boundary": {
@@ -263,8 +266,8 @@ def run_after_market_study_v2(
             result,
             interpretation=(
                 "V2 preserved the V1 replay/prospective study and added audited 15m/60m history, "
-                "D-4H-1H-15m feature context and research-only candlestick/FVG evidence. "
-                "No live policy or broker order authority changed."
+                "D-4H-1H-15m context, candlestick/FVG research, Fibonacci/candle-volume structure "
+                "research, and point-in-time news memory. No live policy or broker authority changed."
             ),
         )
         result["audit_txt"] = audit_path
