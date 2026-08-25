@@ -44,6 +44,63 @@ def test_study_cycle_requires_local_kite_auth(monkeypatch, tmp_path):
     assert result["order_execution_allowed"] is False
 
 
+def test_phase1_identity_is_reused_when_present(monkeypatch):
+    monkeypatch.setattr(
+        study,
+        "get_exchange_listing",
+        lambda exchange, symbol, db_path=None: {"exchange": exchange, "symbol": symbol, "isin": "INE118H01025"},
+    )
+
+    def should_not_refresh(**kwargs):
+        raise AssertionError("security master should not refresh when NSE:BSE is already known")
+
+    monkeypatch.setattr(study, "collect_nse_security_master", should_not_refresh)
+    result = study._ensure_bse_phase1_identity()
+
+    assert result["status"] == "ALREADY_PRESENT"
+    assert result["exchange"] == "NSE"
+    assert result["symbol"] == "BSE"
+
+
+def test_phase1_identity_self_bootstraps_when_missing(monkeypatch):
+    calls = {"lookups": 0, "refreshes": 0}
+
+    def fake_listing(exchange, symbol, db_path=None):
+        calls["lookups"] += 1
+        if calls["lookups"] == 1:
+            return None
+        return {"exchange": exchange, "symbol": symbol, "isin": "INE118H01025"}
+
+    def fake_refresh(**kwargs):
+        calls["refreshes"] += 1
+        return {"status": "SUCCESS", "rows_valid": 2000, "rows_rejected": 0}
+
+    monkeypatch.setattr(study, "get_exchange_listing", fake_listing)
+    monkeypatch.setattr(study, "collect_nse_security_master", fake_refresh)
+
+    result = study._ensure_bse_phase1_identity()
+
+    assert result["status"] == "REFRESHED"
+    assert result["source"] == "NSE_EQUITY_SECURITY_MASTER"
+    assert calls == {"lookups": 2, "refreshes": 1}
+
+
+def test_phase1_identity_fails_closed_if_refresh_does_not_resolve_bse(monkeypatch):
+    monkeypatch.setattr(study, "get_exchange_listing", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        study,
+        "collect_nse_security_master",
+        lambda **kwargs: {"status": "SUCCESS", "rows_valid": 2000, "rows_rejected": 0},
+    )
+
+    try:
+        study._ensure_bse_phase1_identity()
+    except ValueError as exc:
+        assert "NSE:BSE is still unknown" in str(exc)
+    else:
+        raise AssertionError("study must fail closed when Phase 1 still cannot resolve NSE:BSE")
+
+
 def test_successful_cycle_bootstraps_then_is_idempotent(monkeypatch, tmp_path):
     monkeypatch.setenv("KITE_API_KEY", "A" * 16)
     monkeypatch.setenv("KITE_ACCESS_TOKEN", "B" * 32)
@@ -51,6 +108,17 @@ def test_successful_cycle_bootstraps_then_is_idempotent(monkeypatch, tmp_path):
         study,
         "get_operating_mode",
         lambda *args, **kwargs: {"mode": "POST_MARKET_STUDY", "calendar_verified": True},
+    )
+    monkeypatch.setattr(
+        study,
+        "_ensure_bse_phase1_identity",
+        lambda **kwargs: {
+            "status": "ALREADY_PRESENT",
+            "exchange": "NSE",
+            "symbol": "BSE",
+            "isin": "INE118H01025",
+            "source": "PHASE1_LOCAL_IDENTITY_STORE",
+        },
     )
 
     class FakeClient:
@@ -131,6 +199,7 @@ def test_successful_cycle_bootstraps_then_is_idempotent(monkeypatch, tmp_path):
 
     assert result["status"] == "SUCCESS"
     assert result["bootstrap"] is True
+    assert result["phase1_identity"]["status"] == "ALREADY_PRESENT"
     assert calls == ["day", "5minute"]
     assert result["learning_boundary"]["llm_weights_modified"] is False
     assert result["learning_boundary"]["hard_rules_modified"] is False
