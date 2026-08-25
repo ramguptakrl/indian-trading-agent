@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from backend.tradebrain.api_governor import KITE_API_GOVERNOR
 from backend.tradebrain.kite_data import KiteDataOnlyClient, sync_kite_history
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -66,10 +65,9 @@ def sync_kite_history_range(
 ) -> dict[str, Any]:
     """Sync a long range through repeated audited Kite historical requests.
 
-    Default pacing is owned by the central read-only API governor and stays below the
-    documented historical request ceiling. Tests/special callers may supply an explicit
-    non-negative sleep value; `0` deliberately disables the inter-chunk sleep for a
-    fully mocked/no-network call.
+    Real Kite REST calls are paced/retried inside KiteDataOnlyClient, so this range
+    wrapper must not double-throttle them. Tests/special callers may still provide an
+    explicit inter-chunk sleep; `0` disables it for mocked/no-network calls.
     """
     if rate_limit_sleep_seconds is not None and rate_limit_sleep_seconds < 0:
         raise ValueError("rate_limit_sleep_seconds must be >= 0")
@@ -81,9 +79,7 @@ def sync_kite_history_range(
 
     results: list[dict[str, Any]] = []
     for idx, (start, end) in enumerate(chunks):
-        if rate_limit_sleep_seconds is None:
-            KITE_API_GOVERNOR.wait_for_slot("kite_historical")
-        elif idx > 0 and rate_limit_sleep_seconds:
+        if idx > 0 and rate_limit_sleep_seconds:
             time_module.sleep(rate_limit_sleep_seconds)
         result = sync_kite_history(
             exchange=exchange,
@@ -121,5 +117,5 @@ def sync_kite_history_range(
         "fetch_ids": [item.get("fetch_id") for item in results],
         "chunk_results": results,
         "range_is_single_opaque_vendor_request": False,
-        "api_governor": "KITE_READ_ONLY_PROCESS_LOCAL_V1" if rate_limit_sleep_seconds is None else "EXPLICIT_CALLER_PACING",
+        "api_governor": "KITE_CLIENT_INTERNAL_V1" if rate_limit_sleep_seconds is None else "KITE_CLIENT_INTERNAL_PLUS_EXPLICIT_INTER_CHUNK_PACING",
     }
