@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from backend.tradebrain.advisory_pipeline import evaluate_final_advisory, parse_agent_candidate
 from backend.tradebrain.advisory_store import get_final_advisory
+from backend.tradebrain.audit_txt import audit_final_advisory
 
 router = APIRouter(prefix="/api/tradebrain", tags=["tradebrain-phase10"])
 
@@ -51,6 +52,8 @@ def phase10_doctrine():
         "order_endpoint_present": False,
         "mtf_enabled": False,
         "active_modes": ["INTRADAY", "SWING"],
+        "human_readable_txt_audit": True,
+        "hidden_chain_of_thought_persisted": False,
     }
 
 
@@ -62,7 +65,12 @@ def phase10_parse_candidate(data: CandidateParseRequest):
 @router.post("/phase10/final-advisory")
 def phase10_final_advisory(data: FinalAdvisoryRequest):
     try:
-        return evaluate_final_advisory(**data.model_dump())
+        result = evaluate_final_advisory(**data.model_dump())
+        # Do not persist the raw LLM prose here. The result already contains the
+        # strict parsed fields and deterministic gate result needed for auditability.
+        request_audit = data.model_dump(exclude={"final_trade_decision"})
+        audit_final_advisory(result, request=request_audit)
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -88,4 +96,6 @@ def phase10_acceptance_boundary():
         "crash_guard_must_be_explicit": True,
         "broker_permission_must_be_explicit": True,
         "soft_parameter_runtime_requires_human_approved_active_version": True,
+        "human_readable_txt_audit": True,
+        "hidden_chain_of_thought_persisted": False,
     }
