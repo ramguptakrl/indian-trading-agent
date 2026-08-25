@@ -12,8 +12,8 @@ const openSans = Open_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Trade Brain",
-  description: "Advisory-only Indian equity research for NSE/BSE",
+  title: "Trade Brain — BSE Ltd",
+  description: "Advisory-only BSE Ltd research for NSE:BSE — INTRADAY + SWING",
 };
 
 export default function RootLayout({
@@ -22,10 +22,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${openSans.variable} h-full antialiased`}
-    >
+    <html lang="en" className={`${openSans.variable} h-full antialiased`}>
       <body className="min-h-full flex">
         <Sidebar />
         <main className="flex-1 ml-64 min-h-screen bg-background">
