@@ -4,10 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { createActualTrade } from "@/lib/api";
 import type { TradeBrainAdvisory } from "@/lib/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, Link2, ShieldCheck } from "lucide-react";
+import { Building2, Loader2, Link2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
+
+const BSE_TICKER = "BSE";
+const BSE_EXCHANGE = "NSE" as const;
 
 function istNowInput(): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -28,14 +32,12 @@ function toIstIso(value: string): string | undefined {
   return `${value}:00+05:30`;
 }
 
-function candidateNumber(advisory: TradeBrainAdvisory | null | undefined, keys: string[]): number | undefined {
+function candidateNumber(advisory: TradeBrainAdvisory | null | undefined, key: "entry" | "stop_loss" | "take_profit"): number | undefined {
+  const geometryValue = advisory?.trade_geometry?.[key];
+  if (typeof geometryValue === "number" && Number.isFinite(geometryValue) && geometryValue > 0) return geometryValue;
   const candidate = advisory?.ai_candidate || {};
-  for (const key of keys) {
-    const raw = candidate[key];
-    const value = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
-    if (Number.isFinite(value) && value > 0) return value;
-  }
-  return undefined;
+  const raw = candidate[key];
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : undefined;
 }
 
 interface Props {
@@ -54,19 +56,18 @@ export function ActualTradeDialog({
   onClose,
   onSaved,
   advisoryTaskId,
-  ticker: initialTicker,
-  exchange: initialExchange = "NSE",
   researchLabel,
   advisory,
 }: Props) {
   const inferredDirection = researchLabel === "SHORT_CANDIDATE" ? "SHORT" : "LONG";
-  const suggestedEntry = useMemo(() => candidateNumber(advisory, ["entry", "entry_price"]), [advisory]);
-  const suggestedStop = useMemo(() => candidateNumber(advisory, ["stop_loss", "sl", "stop"]), [advisory]);
-  const suggestedTarget = useMemo(() => candidateNumber(advisory, ["take_profit", "target", "tp"]), [advisory]);
+  const inferredMode = advisory?.trade_geometry?.mode === "SWING" || advisory?.ai_candidate?.mode === "SWING"
+    ? "SWING"
+    : "INTRADAY";
+  const suggestedEntry = useMemo(() => candidateNumber(advisory, "entry"), [advisory]);
+  const suggestedStop = useMemo(() => candidateNumber(advisory, "stop_loss"), [advisory]);
+  const suggestedTarget = useMemo(() => candidateNumber(advisory, "take_profit"), [advisory]);
 
-  const [ticker, setTicker] = useState(initialTicker || "");
-  const [exchange, setExchange] = useState<"NSE" | "BSE">(initialExchange);
-  const [mode, setMode] = useState<"INTRADAY" | "SWING">("INTRADAY");
+  const [mode, setMode] = useState<"INTRADAY" | "SWING">(inferredMode);
   const [direction, setDirection] = useState<"LONG" | "SHORT">(inferredDirection);
   const [quantity, setQuantity] = useState("");
   const [entryPrice, setEntryPrice] = useState(suggestedEntry ? String(suggestedEntry) : "");
@@ -79,19 +80,17 @@ export function ActualTradeDialog({
 
   useEffect(() => {
     if (!open) return;
-    setTicker(initialTicker || "");
-    setExchange(initialExchange);
-    setDirection(inferredDirection);
+    setMode(inferredMode);
+    setDirection(inferredMode === "SWING" ? "LONG" : inferredDirection);
     setEntryPrice(suggestedEntry ? String(suggestedEntry) : "");
     setStopLoss(suggestedStop ? String(suggestedStop) : "");
     setTakeProfit(suggestedTarget ? String(suggestedTarget) : "");
     setEntryTime(istNowInput());
-  }, [open, initialTicker, initialExchange, inferredDirection, suggestedEntry, suggestedStop, suggestedTarget]);
+  }, [open, inferredMode, inferredDirection, suggestedEntry, suggestedStop, suggestedTarget]);
 
   const save = async () => {
     const qty = Number(quantity);
     const entry = Number(entryPrice);
-    if (!ticker.trim()) return toast.error("Ticker is required");
     if (!Number.isInteger(qty) || qty <= 0) return toast.error("Enter a valid quantity");
     if (!Number.isFinite(entry) || entry <= 0) return toast.error("Enter a valid entry price");
     if (mode === "SWING" && direction === "SHORT") return toast.error("SWING is LONG-only in Trade Brain");
@@ -99,8 +98,8 @@ export function ActualTradeDialog({
     setSaving(true);
     try {
       const trade: any = await createActualTrade({
-        ticker: ticker.trim().toUpperCase(),
-        exchange,
+        ticker: BSE_TICKER,
+        exchange: BSE_EXCHANGE,
         mode,
         direction,
         quantity: qty,
@@ -112,7 +111,7 @@ export function ActualTradeDialog({
         broker_order_ref: brokerRef || undefined,
         notes: notes || undefined,
       });
-      toast.success(`${trade.ticker} actual trade recorded as OPEN`);
+      toast.success("BSE Ltd actual trade recorded as OPEN");
       if (trade.advisory_alignment === "DIRECTION_MISMATCH") {
         toast.warning("Actual direction differs from the linked advisory; mismatch was preserved.");
       }
@@ -122,7 +121,7 @@ export function ActualTradeDialog({
       setBrokerRef("");
       setNotes("");
     } catch (e: any) {
-      toast.error(e.message || "Failed to record actual trade");
+      toast.error(e.message || "Failed to record actual BSE trade");
     } finally {
       setSaving(false);
     }
@@ -132,11 +131,20 @@ export function ActualTradeDialog({
     <Dialog open={open} onOpenChange={(value) => !value && onClose()}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>I Took This Trade</DialogTitle>
+          <DialogTitle>I Took This BSE Trade</DialogTitle>
           <p className="text-xs text-muted-foreground">
             Records what you actually did at your broker. This screen never places or modifies a broker order.
           </p>
         </DialogHeader>
+
+        <div className="flex items-center gap-3 rounded-lg border bg-muted/20 p-3">
+          <Building2 className="h-5 w-5 text-green-600" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold">BSE Ltd · NSE:BSE</p>
+            <p className="text-[11px] text-muted-foreground">ISIN INE118H01025 · fixed Trade Brain instrument</p>
+          </div>
+          <Badge variant="outline">NSE</Badge>
+        </div>
 
         {advisoryTaskId && (
           <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50/40 p-3 text-xs">
@@ -150,19 +158,16 @@ export function ActualTradeDialog({
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="text-xs font-medium mb-1 block">Ticker</label>
-            <Input value={ticker} onChange={(e) => setTicker(e.target.value.toUpperCase())} disabled={!!initialTicker} />
-          </div>
-          <div>
-            <label className="text-xs font-medium mb-1 block">Exchange</label>
-            <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={exchange} onChange={(e) => setExchange(e.target.value as "NSE" | "BSE")}>
-              <option value="NSE">NSE</option>
-              <option value="BSE">BSE</option>
-            </select>
-          </div>
-          <div>
             <label className="text-xs font-medium mb-1 block">Mode</label>
-            <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={mode} onChange={(e) => setMode(e.target.value as "INTRADAY" | "SWING")}>
+            <select
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              value={mode}
+              onChange={(e) => {
+                const next = e.target.value as "INTRADAY" | "SWING";
+                setMode(next);
+                if (next === "SWING") setDirection("LONG");
+              }}
+            >
               <option value="INTRADAY">INTRADAY</option>
               <option value="SWING">SWING</option>
             </select>
@@ -179,7 +184,7 @@ export function ActualTradeDialog({
             <Input type="number" min="1" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 200" />
           </div>
           <div>
-            <label className="text-xs font-medium mb-1 block">Actual Entry Price (Rs.)</label>
+            <label className="text-xs font-medium mb-1 block">Actual Entry Price (₹)</label>
             <Input type="number" min="0" step="0.01" value={entryPrice} onChange={(e) => setEntryPrice(e.target.value)} placeholder="Actual broker fill" />
           </div>
           <div>
@@ -195,7 +200,7 @@ export function ActualTradeDialog({
             <Input type="number" step="0.01" value={stopLoss} onChange={(e) => setStopLoss(e.target.value)} />
           </div>
           <div>
-            <label className="text-xs font-medium mb-1 block">Target (optional)</label>
+            <label className="text-xs font-medium mb-1 block">Primary Target (optional)</label>
             <Input type="number" step="0.01" value={takeProfit} onChange={(e) => setTakeProfit(e.target.value)} />
           </div>
         </div>
@@ -207,14 +212,14 @@ export function ActualTradeDialog({
 
         <div className="rounded-lg border bg-muted/30 p-3 flex gap-2 text-xs text-muted-foreground">
           <ShieldCheck className="h-4 w-4 flex-shrink-0" />
-          <span>Actual trades are stored separately from paper/replay outcomes. Estimated charges can later be replaced with broker-statement charges for a closed slice.</span>
+          <span>Actual BSE trades are stored separately from paper/replay outcomes. Estimated charges can later be replaced with broker-statement charges for a closed slice.</span>
         </div>
 
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button onClick={save} disabled={saving}>
             {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-            Record OPEN Trade
+            Record OPEN BSE Trade
           </Button>
         </div>
       </DialogContent>
