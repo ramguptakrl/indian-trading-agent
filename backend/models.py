@@ -17,7 +17,7 @@ class AnalysisRequest(BaseModel):
 
     ticker: str = "BSE"
     trade_date: str
-    analysts: list[str] = ["market", "social", "news", "fundamentals"]
+    analysts: list[str] = ["market", "news", "fundamentals"]
     max_debate_rounds: int = 1
     max_risk_discuss_rounds: int = 1
     output_language: str = "English"
