@@ -12,7 +12,7 @@ import re
 from datetime import date, datetime, timezone
 from typing import Any, Iterable
 
-METHOD_VERSION = "BSE_CORPORATE_ACTION_CONTEXT_V1"
+METHOD_VERSION = "BSE_CORPORATE_ACTION_CONTEXT_V2_DATE_PARSE"
 
 _DATE_TOKEN = (
     r"(?:\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|"
@@ -41,7 +41,10 @@ def _text(event: dict[str, Any]) -> str:
 def _parse_date_token(raw: str | None) -> str | None:
     if not raw:
         return None
-    value = re.sub(r"\s+", " ", raw.replace("Sept", "Sep")).strip().rstrip(".,;")
+    # Normalize only the standalone abbreviation "Sept". A plain string replacement
+    # would also mutate "September" into "Sepember" and lose an explicitly stated date.
+    value = re.sub(r"\bSept\b", "Sep", raw, flags=re.IGNORECASE)
+    value = re.sub(r"\s+", " ", value).strip().rstrip(".,;")
     for fmt in _DATE_FORMATS:
         try:
             return datetime.strptime(value, fmt).date().isoformat()
