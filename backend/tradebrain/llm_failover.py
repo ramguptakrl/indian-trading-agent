@@ -11,19 +11,26 @@ from typing import Any
 
 RETRYABLE_MARKERS = (
     "resource_exhausted",
+    "resource has been exhausted",
     "rate limit",
     "rate_limit",
+    "ratelimiterror",
     "quota",
     "too many requests",
     "429",
     "temporarily unavailable",
     "service unavailable",
+    "server overloaded",
+    "overloaded",
+    "capacity",
     "503",
+    "502",
+    "504",
 )
 
 
 def is_retryable_llm_capacity_error(exc: BaseException) -> bool:
-    """Return True only for provider capacity/quota style failures."""
+    """Return True only for provider capacity/quota/transient availability failures."""
     text = str(exc).lower()
     return any(marker in text for marker in RETRYABLE_MARKERS)
 
@@ -73,15 +80,17 @@ def get_material_verifier_config(config: dict[str, Any]) -> dict[str, Any] | Non
 
 
 def public_capacity_error(exc: BaseException, *, fallback_available: bool) -> str:
-    """Return a concise user-safe message instead of a provider SDK error dump."""
+    """Return a concise user-safe fail-closed message instead of an SDK error dump."""
     if fallback_available:
         return (
-            "The primary AI provider hit a temporary quota/rate limit and the configured "
-            "alternate provider also could not complete the analysis. Retry after the "
-            "cooldown or review Settings > Models & Keys."
+            "AI_UNAVAILABLE / WAIT: the primary AI provider hit a temporary quota/rate "
+            "limit and the configured alternate provider also could not complete the "
+            "analysis. Trade Brain remains WAIT / NO TRADE. Retry after the cooldown or "
+            "review Settings > Models & Keys."
         )
     return (
-        "The selected AI provider hit a temporary quota/rate limit and no configured "
-        "alternate provider is currently available. Retry after the provider cooldown "
-        "or review Settings > Models & Keys."
+        "AI_UNAVAILABLE / WAIT: the selected AI provider hit a temporary quota/rate "
+        "limit and no configured alternate provider is currently available. Trade Brain "
+        "remains WAIT / NO TRADE. Retry after the provider cooldown or review Settings > "
+        "Models & Keys."
     )
