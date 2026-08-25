@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from backend.tradebrain.guardian_context import _correction_from_regime, _event_risk, _news_risk
-from backend.tradebrain.position_guardian import assess_open_trade_risk
+from backend.tradebrain.position_guardian import _quote_freshness, assess_open_trade_risk
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -55,6 +55,35 @@ def test_ordinary_direct_news_is_elevated_not_forced_high():
 def test_high_vol_down_alignment_maps_to_guardian_correction_state():
     assert _correction_from_regime({"regime": "HIGH_VOL", "close": 90, "sma20": 95, "sma50": 100}) == "HIGH_VOL_TREND_DOWN"
     assert _correction_from_regime({"regime": "HIGH_VOL", "close": 105, "sma20": 100, "sma50": 95}) == "HIGH_VOL"
+
+
+def test_fresh_kite_quote_is_accepted_for_guardian_use():
+    result = _quote_freshness(
+        {"received_at": "2026-08-25T06:00:00+00:00"},
+        evaluated_at="2026-08-25T06:02:00+00:00",
+    )
+    assert result["fresh"] is True
+    assert result["status"] == "FRESH"
+    assert result["quote_age_seconds"] == 120.0
+
+
+def test_stale_kite_quote_is_rejected_for_guardian_use():
+    result = _quote_freshness(
+        {"received_at": "2026-08-25T05:00:00+00:00"},
+        evaluated_at="2026-08-25T06:00:00+00:00",
+    )
+    assert result["fresh"] is False
+    assert result["status"] == "STALE"
+    assert result["quote_age_seconds"] == 3600.0
+
+
+def test_quote_without_timestamp_fails_closed():
+    result = _quote_freshness(
+        {"last_price": 100.0},
+        evaluated_at="2026-08-25T06:00:00+00:00",
+    )
+    assert result["fresh"] is False
+    assert result["status"] == "UNVERIFIED"
 
 
 def test_split_ex_date_outranks_raw_stop_breach():
