@@ -1,10 +1,12 @@
-"""Phase 6 resident-Indian equity economics: INTRADAY + SWING only.
+"""Phase 6 resident-Indian equity transaction-cost component.
 
 The trader/accounting profile is RESIDENT_INDIAN. A Kite/Zerodha credential may be
 configured later as MARKET_DATA_ONLY even if that credential belongs to an NRI
 account; credential account type never changes the resident policy/cost profile here.
 
-No MTF, funded amount, pledge interest, or financing cost exists in this module.
+This module intentionally contains no MTF funding cost. Active SWING funding permission
+is defined by the Trade Brain product/policy layer and is Zerodha MTF-only; `swing_mtf.py`
+combines this base transaction-cost component with the separately versioned MTF layer.
 """
 
 from __future__ import annotations
@@ -129,7 +131,7 @@ def _calculate_core(
     if quantity <= 0:
         raise ValueError("quantity must be positive")
     if active_mode == "SWING" and direction != "LONG":
-        raise ValueError("SWING is LONG cash/delivery equity only in the active architecture")
+        raise ValueError("SWING base transaction-cost leg is LONG delivery equity only")
 
     entry_fill, exit_fill = _fill_prices(direction, entry_price, exit_price, slippage_bps)
     qty = Decimal(quantity)
@@ -209,7 +211,7 @@ def _calculate_core(
 
 
 def calculate_equity_trade_costs(**kwargs: Any) -> dict[str, Any]:
-    """Calculate complete resident equity round-trip costs and true net P&L."""
+    """Calculate complete resident equity round-trip transaction costs and true net P&L."""
     result = _calculate_core(**kwargs)
     result["break_even_exit_price"] = solve_exit_price_for_net_profit(
         desired_net_profit=0.0,
@@ -279,10 +281,13 @@ def solve_exit_price_for_net_profit(
 
 
 def cost_profile() -> dict[str, Any]:
+    """Return base transaction-cost metadata without granting any funding permission."""
     return {
         **COST_PROFILE,
         "data_credential_boundary": data_credential_boundary(),
         "active_modes": ["INTRADAY", "SWING"],
-        "swing_funding": "OWN_CASH_ONLY",
+        "component_scope": "BASE_RESIDENT_EQUITY_TRANSACTION_COSTS_ONLY",
+        "swing_funding": "NOT_APPLICABLE_BASE_COMPONENT",
+        "active_swing_funding_permission": "DEFINED_BY_TRADEBRAIN_POLICY_NOT_THIS_COMPONENT",
         "paper_intraday_buying_power": "CASH_NOTIONAL_CONSERVATIVE",
     }
