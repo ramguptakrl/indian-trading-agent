@@ -131,7 +131,9 @@ def build_guardian_context(
     db_path: str | None = None,
 ) -> dict[str, Any]:
     now = _dt(evaluated_at) or datetime.now(timezone.utc)
-    events = list_events(limit=500, db_path=db_path)
+    # Inbox status is a human workflow state, not an evidence-retention boundary.
+    # Reviewed/archived official events must remain available to point-in-time risk logic.
+    events = list_events(status=None, limit=500, db_path=db_path)
     official = _event_risk(events, now=now)
     action = corporate_action_context(
         events,
