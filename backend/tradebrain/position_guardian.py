@@ -3,6 +3,7 @@
 The guardian never places/modifies/cancels broker orders. It keeps a human-reported
 position under Trade Brain review until the journal is explicitly closed and ensures
 hard intraday timing/data-integrity/corporate-action constraints outrank AI opinion.
+A persisted Kite quote must also be fresh before it can drive live position interpretation.
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ from backend.tradebrain.market_guards import combined_market_guard
 
 IST = ZoneInfo("Asia/Kolkata")
 INTRADAY_HARD_EXIT = time(15, 15)
-METHOD_VERSION = "BSE_POSITION_GUARDIAN_V2_AUTO_CONTEXT"
+MAX_LIVE_QUOTE_AGE_SECONDS = 180
+METHOD_VERSION = "BSE_POSITION_GUARDIAN_V3_FRESH_QUOTE"
 
 
 def _dt(value: str | datetime) -> datetime:
@@ -26,6 +28,53 @@ def _dt(value: str | datetime) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _quote_freshness(
+    quote: dict[str, Any], *, evaluated_at: str | datetime | None = None
+) -> dict[str, Any]:
+    """Fail closed unless the locally persisted Kite quote is recent and timestamped."""
+    now = _dt(evaluated_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    raw_received = quote.get("received_at")
+    if not raw_received:
+        return {
+            "status": "UNVERIFIED",
+            "fresh": False,
+            "quote_received_at": None,
+            "quote_age_seconds": None,
+            "max_quote_age_seconds": MAX_LIVE_QUOTE_AGE_SECONDS,
+            "reason": "Persisted Kite quote has no received_at timestamp",
+        }
+    try:
+        received = _dt(str(raw_received)).astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return {
+            "status": "UNVERIFIED",
+            "fresh": False,
+            "quote_received_at": str(raw_received),
+            "quote_age_seconds": None,
+            "max_quote_age_seconds": MAX_LIVE_QUOTE_AGE_SECONDS,
+            "reason": "Persisted Kite quote received_at timestamp is malformed",
+        }
+    age = (now - received).total_seconds()
+    if age < -5:
+        return {
+            "status": "UNVERIFIED",
+            "fresh": False,
+            "quote_received_at": received.isoformat(),
+            "quote_age_seconds": round(age, 3),
+            "max_quote_age_seconds": MAX_LIVE_QUOTE_AGE_SECONDS,
+            "reason": "Persisted Kite quote timestamp is unexpectedly in the future",
+        }
+    fresh = age <= MAX_LIVE_QUOTE_AGE_SECONDS
+    return {
+        "status": "FRESH" if fresh else "STALE",
+        "fresh": fresh,
+        "quote_received_at": received.isoformat(),
+        "quote_age_seconds": round(max(age, 0.0), 3),
+        "max_quote_age_seconds": MAX_LIVE_QUOTE_AGE_SECONDS,
+        "reason": None if fresh else "Persisted Kite quote is older than the Guardian live-data freshness limit",
+    }
 
 
 def _is_adverse(direction: str, entry: float, current: float) -> bool:
@@ -203,7 +252,7 @@ def position_guardian_snapshot(
     event_risk: str | None = None,
     correction_state: str | None = None,
 ) -> dict[str, Any]:
-    """Mark open BSE trades against Kite plus automatic point-in-time local risk context."""
+    """Mark open BSE trades against fresh Kite data plus point-in-time local risk context."""
     open_trades = list_actual_trades(status="OPEN", limit=1000, db_path=db_path)
     partial = list_actual_trades(status="PARTIALLY_CLOSED", limit=1000, db_path=db_path)
     trades = [item for item in [*open_trades, *partial] if str(item.get("ticker") or "").upper() == "BSE"]
@@ -220,6 +269,22 @@ def position_guardian_snapshot(
             "open_trades": len(trades),
             "positions": [],
             "reason": "No locally persisted Kite BSE quote is available",
+            "guardian_context": context,
+            "event_risk": resolved_event_risk,
+            "correction_state": resolved_correction,
+            "trade_authorization": False,
+            "order_execution_allowed": False,
+        }
+
+    freshness = _quote_freshness(quote, evaluated_at=evaluated_at)
+    if not freshness["fresh"]:
+        return {
+            "method_version": METHOD_VERSION,
+            "status": "STALE_LIVE_BSE_QUOTE" if freshness["status"] == "STALE" else "LIVE_BSE_QUOTE_FRESHNESS_UNVERIFIED",
+            "open_trades": len(trades),
+            "positions": [],
+            "reason": freshness["reason"],
+            "quote_freshness": freshness,
             "guardian_context": context,
             "event_risk": resolved_event_risk,
             "correction_state": resolved_correction,
@@ -270,6 +335,7 @@ def position_guardian_snapshot(
         "method_version": METHOD_VERSION,
         "status": "SUCCESS",
         "quote_received_at": quote.get("received_at"),
+        "quote_freshness": freshness,
         "current_price": current,
         "market_guard": guard,
         "guardian_context": context,
@@ -278,7 +344,7 @@ def position_guardian_snapshot(
         "event_risk": resolved_event_risk,
         "event_risk_source": "MANUAL_OVERRIDE" if event_risk is not None else "AUTO_LOCAL_EVENT_NEWS_MEMORY",
         "correction_state": resolved_correction,
-        "correction_state_source": "MANUAL_OVERRIDE" if correction_state is not None else "AUTO_AUDITED_BSE_DAILY_REGIME",
+        "correction_state_source": "MANUAL_OVERRIDE" if correction_state is not None else "AUTO_AUDITED_BSE_PLUS_NIFTY_CONTEXT",
         "event_news_auto_integration_complete": True,
         "audited_bse_correction_auto_integration_complete": context.get("correction_context_status") == "AUDITED_BSE_DAILY_CONTEXT",
         "broader_market_correction_auto_integration_complete": bool(context.get("broader_market_correction_auto_complete")),
