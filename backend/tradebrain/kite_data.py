@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from backend.tradebrain.api_governor import KITE_API_GOVERNOR, kite_bucket_for_path
 from backend.tradebrain.market_data import validate_bars
 from backend.tradebrain.market_data_store import (
     ensure_series,
@@ -69,6 +70,7 @@ def kite_data_boundary() -> dict[str, Any]:
         "order_api_enabled": False,
         "credential_account_type_affects_policy": False,
         "credential_account_type_affects_cost_profile": False,
+        "rest_governor": "KITE_READ_ONLY_PROCESS_LOCAL_V1",
     }
 
 
@@ -110,9 +112,25 @@ class KiteDataOnlyClient:
         }
 
     def _get(self, path: str, *, params: Any = None, expect_json: bool = True) -> Any:
-        response = self.session.get(
-            f"{KITE_BASE_URL}{path}", headers=self._headers(), params=params, timeout=self.timeout
-        )
+        """Govern every Kite REST read and retry only transient/capacity failures."""
+        bucket = kite_bucket_for_path(path)
+        rule = KITE_API_GOVERNOR.rule(bucket)
+        response = None
+        for attempt in range(rule.max_retries + 1):
+            KITE_API_GOVERNOR.wait_for_slot(bucket)
+            response = self.session.get(
+                f"{KITE_BASE_URL}{path}", headers=self._headers(), params=params, timeout=self.timeout
+            )
+            status = int(getattr(response, "status_code", 200) or 200)
+            if status not in {429, 502, 503, 504} or attempt >= rule.max_retries:
+                break
+            KITE_API_GOVERNOR.register_retry(
+                bucket,
+                attempt=attempt,
+                headers=getattr(response, "headers", None),
+            )
+        if response is None:  # pragma: no cover - defensive guard
+            raise RuntimeError("Kite REST request produced no response")
         response.raise_for_status()
         if not expect_json:
             return response.text
