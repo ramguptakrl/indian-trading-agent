@@ -1,0 +1,83 @@
+TRADE BRAIN — PERMANENT SANITIZED LEARNING LOG
+================================================
+
+Purpose
+-------
+This repository file records durable, sanitized project learning checkpoints: experiments,
+validation results, engineering discoveries, rejected ideas, evidence-boundary decisions,
+and interpretation summaries that should survive individual local/runtime sessions.
+
+This file MUST NEVER contain API secrets, access tokens, request tokens, passwords, cookies,
+authorization headers, broker credentials, or hidden chain-of-thought.
+
+Runtime detail belongs in the append-only local TXT audit under:
+  %USERPROFILE%\.tradingagents\tradebrain\audit_txt\
+
+Product boundary
+----------------
+- Modeled trader: RESIDENT_INDIAN.
+- Active modes: INTRADAY and SWING.
+- Zerodha Kite role: MARKET_DATA_ONLY.
+- Automatic broker order execution: DISABLED.
+- Hard safety rules: protected; never auto-optimized.
+- Learning means evidence collection/replay/calibration, not autonomous LLM-weight training.
+- Challenger/soft-parameter promotion requires explicit human approval.
+
+2026-08-25 — Zerodha live-data operational validation
+------------------------------------------------------
+STATUS: PASSED
+
+Evidence:
+- Zerodha login flow successfully produced a request_token.
+- Direct documented session-token exchange succeeded once the complete API secret was
+  supplied locally.
+- Read-only REST validation returned NSE:BSE LTP = 3303 during the validation session.
+- Trade Brain's Kite MARKET_DATA_ONLY WebSocket process started successfully.
+- WebSocket log received NSE:BSE quote records with last_price = 3303.0 and source label
+  ZERODHA_KITE_WEBSOCKET_MARKET_DATA_ONLY.
+- order_api_enabled remained false.
+
+Engineering discovery:
+- Windows hidden/character-by-character secret prompts can truncate pasted secrets. Earlier
+  Invalid checksum failures were reproduced because the locally received secret length was
+  shorter than the actual secret. A normal local paste path with the complete 32-character
+  secret resolved the checksum exchange.
+- The http://127.0.0.1/ redirect was not the root cause; it worked for the manual
+  request-token-copy flow.
+- Redirected Python stdout needed unbuffered mode for immediate Kite sidecar logs.
+
+Interpretation:
+- Live broker market-data transport is operational.
+- This validates connectivity/authentication and read-only price transport only; it is not
+  a profitability claim and does not authorize broker execution.
+
+2026-08-25 — Automatic after-market study architecture
+------------------------------------------------------
+STATUS: IMPLEMENTATION STARTED
+
+Decision:
+- Use the current audited Phase-3/4/5 evidence plane rather than the legacy yfinance AI
+  backtester as the canonical automatic learning path.
+- Market hours remain live/read-only observation.
+- Post-market/non-trading study mode may refresh audited Kite historical data, replay
+  existing NSE:BSE plans, run exploratory evidence studies, and update the frozen
+  prospective BSE hypothesis.
+- Local runtime evidence and interpretation are appended to sanitized TXT audit files.
+- No automatic hard-rule mutation, no automatic soft-parameter promotion, and no order
+  endpoints are permitted.
+
+Implemented components:
+- backend/tradebrain/study_cycle.py
+- scripts/tradebrain_after_market_study.py
+- Study-TradeBrain.bat
+
+Initial bootstrap policy:
+- Daily Kite history: up to 3650 calendar days.
+- 5-minute Kite history: up to 1825 calendar days.
+- Subsequent refresh: rolling 14 calendar days.
+- Long ranges use the audited chunked Kite sync path and its conservative request limits.
+
+Interpretation:
+- "Training" in Trade Brain is now explicitly defined as accumulating falsifiable market
+  evidence, replay outcomes, and prospective observations. It does not fine-tune the LLM
+  or grant the model authority to rewrite protected trading policy.
