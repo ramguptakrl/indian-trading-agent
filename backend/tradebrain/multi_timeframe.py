@@ -17,6 +17,7 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from backend.tradebrain.corporate_actions import corporate_action_context_from_store
 from backend.tradebrain.market_data_store import get_series, query_bars
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -171,7 +172,11 @@ def _key_levels(bars_4h: list[dict[str, Any]]) -> dict[str, float | None]:
     }
 
 
-def _gap_snapshot(daily: list[dict[str, Any]]) -> dict[str, Any]:
+def _gap_snapshot(
+    daily: list[dict[str, Any]],
+    *,
+    corporate_action: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if len(daily) < 2:
         return {"status": "INSUFFICIENT_DATA"}
     previous = daily[-2]
@@ -182,17 +187,32 @@ def _gap_snapshot(daily: list[dict[str, Any]]) -> dict[str, Any]:
         return {"status": "INVALID_PREVIOUS_CLOSE"}
     gap_pct = (current_open / prev_close - 1.0) * 100.0
     if abs(gap_pct) < 1e-12:
-        direction = "FLAT_OPEN"
+        raw_direction = "FLAT_OPEN"
     else:
-        direction = "GAP_UP" if gap_pct > 0 else "GAP_DOWN"
+        raw_direction = "GAP_UP" if gap_pct > 0 else "GAP_DOWN"
+    session_date = _dt(str(current["ts_open"])).astimezone(IST).date().isoformat()
+    action = corporate_action or {}
+    affected = bool(action.get("mechanical_gap_risk"))
     return {
-        "status": "OK",
-        "direction": direction,
+        "status": "CORPORATE_ACTION_AFFECTED" if affected else "OK",
+        "direction": "CORPORATE_ACTION_AFFECTED_OPEN" if affected else raw_direction,
         "gap_pct": round(gap_pct, 4),
+        "raw_direction": raw_direction,
+        "raw_gap_pct": round(gap_pct, 4),
         "previous_close": round(prev_close, 4),
         "session_open": round(current_open, 4),
         "gap_fill_reference": round(prev_close, 4),
-        "session_date_ist": _dt(str(current["ts_open"])).astimezone(IST).date().isoformat(),
+        "session_date_ist": session_date,
+        "eligible_as_normal_gap_signal": not affected,
+        "mechanical_gap_risk": affected,
+        "corporate_action_types": sorted({str(x.get("action_type")) for x in action.get("ex_date_actions", [])}),
+        "stock_split_ex_date": bool(action.get("stock_split_ex_date")),
+        "dividend_ex_date": bool(action.get("dividend_ex_date")),
+        "interpretation": (
+            "Raw open-vs-previous-close move is preserved for audit but excluded from normal gap interpretation on a known ex-date."
+            if affected
+            else "Raw open-vs-previous-close gap is comparable under currently known corporate-action context."
+        ),
     }
 
 
@@ -223,11 +243,26 @@ def multi_timeframe_snapshot(
     h1_summary = _frame_summary(hourly, label="1H_SETUP")
     m15_summary = _frame_summary(fifteen, label="15M_ENTRY_REFINEMENT")
 
+    action_context: dict[str, Any] = {
+        "status": "NOT_APPLICABLE_NO_DAILY_BAR",
+        "mechanical_gap_risk": False,
+        "raw_price_series_structural_break": False,
+    }
+    if daily and str(series.get("symbol") or "").upper() == "BSE":
+        session_date = _dt(str(daily[-1]["ts_open"])).astimezone(IST).date().isoformat()
+        action_context = corporate_action_context_from_store(
+            session_date=session_date,
+            known_by=cutoff,
+            db_path=db_path,
+        )
+
     alignment = "UNKNOWN"
     trends = [daily_summary.get("trend"), h4_summary.get("trend"), h1_summary.get("trend")]
     bullish = sum(t in {"UP", "ABOVE_EMA20"} for t in trends)
     bearish = sum(t in {"DOWN", "BELOW_EMA20"} for t in trends)
-    if bullish >= 3:
+    if action_context.get("raw_price_series_structural_break"):
+        alignment = "PRICE_SERIES_STRUCTURAL_BREAK"
+    elif bullish >= 3:
         alignment = "BULLISH_ALIGNED"
     elif bearish >= 3:
         alignment = "BEARISH_ALIGNED"
@@ -251,8 +286,11 @@ def multi_timeframe_snapshot(
             "1h": h1_summary,
             "15m": m15_summary,
         },
-        "opening_gap": _gap_snapshot(daily),
+        "opening_gap": _gap_snapshot(daily, corporate_action=action_context),
+        "corporate_action_context": action_context,
         "alignment": alignment,
+        "price_comparability_block": bool(action_context.get("raw_price_series_structural_break")),
+        "requires_price_era_rebuild": bool(action_context.get("raw_price_series_structural_break")),
         "4h_construction": "ROLLING_4X_COMPLETED_60M_SAME_IST_SESSION_DATE",
         "4h_exchange_native": False,
         "research_only": True,
