@@ -1,11 +1,11 @@
 """Automatic after-market evidence/study cycle for Trade Brain.
 
 This is deliberately a research/evidence loop, not autonomous trading and not LLM
-fine-tuning.  It refreshes audited Zerodha Kite historical candles, replays already
+fine-tuning. It refreshes audited Zerodha Kite historical candles, replays already
 recorded BSE plans, updates the frozen prospective BSE hypothesis, and writes a
 human-readable sanitized audit summary.
 
-Protected rules are never changed here.  No broker order endpoint is available or
+Protected rules are never changed here. No broker order endpoint is available or
 called by this module.
 """
 
@@ -27,6 +27,8 @@ from backend.tradebrain.kite_data import KiteDataOnlyClient
 from backend.tradebrain.kite_history_range import sync_kite_history_range
 from backend.tradebrain.prospective_gap import collect_prospective_gap_observations
 from backend.tradebrain.schedule import get_operating_mode
+from backend.tradebrain.security_master import collect_nse_security_master
+from backend.tradebrain.security_store import get_exchange_listing
 
 IST = ZoneInfo("Asia/Kolkata")
 ALLOWED_STUDY_MODES = {"POST_MARKET_STUDY", "STUDY_REPLAY"}
@@ -75,6 +77,44 @@ def _token_fingerprint() -> str | None:
     if not token:
         return None
     return hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
+
+
+def _ensure_bse_phase1_identity(*, db_path: str | None = None) -> dict[str, Any]:
+    """Ensure NSE:BSE exists in the audited Phase-1 identity store.
+
+    Fresh Windows installs can have valid Kite credentials but an empty local Phase-1
+    database. Historical market-data ingestion must not bypass the identity boundary, so
+    the study cycle self-bootstraps from the official NSE equity master only when the
+    exact NSE:BSE listing is absent.
+    """
+    listing = get_exchange_listing("NSE", "BSE", db_path=db_path)
+    if listing is not None:
+        return {
+            "status": "ALREADY_PRESENT",
+            "exchange": "NSE",
+            "symbol": "BSE",
+            "isin": listing.get("isin"),
+            "source": "PHASE1_LOCAL_IDENTITY_STORE",
+        }
+
+    refresh = collect_nse_security_master(db_path=db_path)
+    listing = get_exchange_listing("NSE", "BSE", db_path=db_path)
+    if listing is None:
+        raise ValueError(
+            "Phase 1 NSE security master refreshed successfully but NSE:BSE is still unknown; "
+            "audited market-data creation remains blocked"
+        )
+
+    return {
+        "status": "REFRESHED",
+        "exchange": "NSE",
+        "symbol": "BSE",
+        "isin": listing.get("isin"),
+        "source": "NSE_EQUITY_SECURITY_MASTER",
+        "collector_status": refresh.get("status"),
+        "rows_valid": refresh.get("rows_valid"),
+        "rows_rejected": refresh.get("rows_rejected"),
+    }
 
 
 def _history_summary(result: dict[str, Any]) -> dict[str, Any]:
@@ -146,7 +186,7 @@ def _replay_existing_bse_plans(
             )
             key = str(outcome.get("outcome") or "UNKNOWN")
             counts[key] = counts.get(key, 0) + 1
-        except Exception as exc:  # one malformed historic plan must not stop the study cycle
+        except Exception as exc:
             failures.append({"plan_id": plan_id, "error_type": type(exc).__name__, "error": str(exc)[:240]})
     return {
         "plans_seen": len(plans),
@@ -168,13 +208,7 @@ def run_after_market_study(
     state_path: str | Path | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any]:
-    """Run one idempotent evidence-learning cycle for NSE:BSE.
-
-    A normal invocation runs at most once per IST calendar date after the market is
-    closed (or during a non-trading STUDY_REPLAY day). ``force`` bypasses only the
-    scheduling/idempotency guard; it never bypasses hard trading policy because this
-    routine has no order path.
-    """
+    """Run one idempotent evidence-learning cycle for NSE:BSE."""
     if min(bootstrap_daily_days, bootstrap_5m_days, incremental_days) <= 0:
         raise ValueError("Study lookback days must be positive")
 
@@ -232,6 +266,7 @@ def run_after_market_study(
     token_fingerprint = _token_fingerprint()
 
     try:
+        phase1_identity = _ensure_bse_phase1_identity(db_path=db_path)
         instrument = client.resolve_equity_instrument("NSE", "BSE")
         instrument_token = int(instrument["instrument_token"])
         daily_result = sync_kite_history_range(
@@ -286,6 +321,7 @@ def run_after_market_study(
             "now_ist": as_of,
             "operating_mode": operating.get("mode"),
             "bootstrap": bootstrap,
+            "phase1_identity": phase1_identity,
             "series_id": series_id,
             "history": {
                 "daily": _history_summary(daily_result),
@@ -310,7 +346,7 @@ def run_after_market_study(
             "AFTER_MARKET_STUDY_COMPLETED",
             result,
             interpretation=(
-                "Kite history was refreshed and audited research/replay evidence was updated. "
+                "Phase-1 identity was verified, Kite history was refreshed, and audited research/replay evidence was updated. "
                 "This is evidence learning only: no LLM weights, protected rules, broker orders, or automatic promotion changed."
             ),
         )
