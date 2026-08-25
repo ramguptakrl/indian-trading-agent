@@ -41,6 +41,7 @@ on:
       - "scripts/tradebrain_phase10_smoke.py"
       - "scripts/tradebrain_bse_evidence_baseline.py"
       - "scripts/tradebrain_kite_live_stream.py"
+      - "scripts/tradebrain_test_interpretation.py"
       - "start.sh"
       - "pyproject.toml"
       - ".env.example"
@@ -90,6 +91,7 @@ on:
       - "scripts/tradebrain_phase10_smoke.py"
       - "scripts/tradebrain_bse_evidence_baseline.py"
       - "scripts/tradebrain_kite_live_stream.py"
+      - "scripts/tradebrain_test_interpretation.py"
       - "start.sh"
       - "pyproject.toml"
       - ".env.example"
@@ -141,6 +143,7 @@ jobs:
           scripts/tradebrain_phase10_smoke.py
           scripts/tradebrain_bse_evidence_baseline.py
           scripts/tradebrain_kite_live_stream.py
+          scripts/tradebrain_test_interpretation.py
           tradingagents/dataflows/interface.py
           tradingagents/dataflows/tradebrain_market.py
           tradingagents/graph/signal_processing.py
@@ -148,8 +151,26 @@ jobs:
           tradingagents/agents/managers/portfolio_manager.py
       - name: Validate one-button launcher syntax
         run: bash -n start.sh
-      - name: Run Trade Brain tests
-        run: python -m unittest discover -s tests -p "test_tradebrain_*.py" -v
+      - name: Run Trade Brain tests + write TXT interpretation
+        shell: bash
+        run: |
+          mkdir -p artifacts/audit
+          set +e
+          python -m unittest discover -s tests -p "test_tradebrain_*.py" -v 2>&1 | tee artifacts/audit/tradebrain-tests.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          python scripts/tradebrain_test_interpretation.py \
+            --test-log artifacts/audit/tradebrain-tests.txt \
+            --exit-code "$status" \
+            --output artifacts/audit/tradebrain-test-interpretation.txt
+          exit "$status"
+      - name: Upload Trade Brain TXT validation audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tradebrain-test-audit-txt
+          path: artifacts/audit/
+          if-no-files-found: warn
       - name: Live Phase 2 exchange + attachment smoke (observational)
         continue-on-error: true
         run: python scripts/tradebrain_phase2_smoke.py
