@@ -1,12 +1,13 @@
 """Deterministic Trade Brain policy layer.
 
-The existing multi-agent system may research, debate, rank, and propose ideas. This
-module is the final deterministic gate for a structured trade plan. It deliberately
-does not place orders and cannot be overridden by an LLM response.
+The multi-agent system may research, debate, rank, and propose ideas. This module is
+the final deterministic gate for a structured trade plan. It does not place orders and
+cannot be overridden by an LLM response.
 
-Active product modes are INTRADAY and SWING. Historical DAY and SWING_POSITION
-values remain accepted as compatibility aliases only. Human-approved Phase-5 soft
-R:R versions may change the advisory WAIT preference, but never any hard rule.
+Active product modes are INTRADAY and SWING. Historical DAY and SWING_POSITION values
+remain compatibility aliases. SWING is LONG-only and separates trade horizon from
+funding: own-cash CNC or verified MTF. Human-approved soft R:R versions may change an
+advisory WAIT preference, but never a hard rule.
 """
 
 from __future__ import annotations
@@ -18,13 +19,14 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field, field_validator
 
 from backend.tradebrain.soft_runtime import effective_reward_risk_preference
-from backend.tradebrain.trade_modes import CompatibleTradeMode, to_active_mode, to_legacy_mode
+from backend.tradebrain.trade_modes import CompatibleTradeMode, to_active_mode, to_legacy_mode, to_swing_funding
 
 IST = ZoneInfo("Asia/Kolkata")
 
 TradeMode = CompatibleTradeMode
 Direction = Literal["LONG", "SHORT"]
 CrashGuardState = Literal["NORMAL", "ELEVATED", "SEVERE"]
+SwingFunding = Literal["CNC_OWN_CASH", "MTF"]
 
 INTRADAY_NO_FRESH_ENTRY = time(15, 10)
 INTRADAY_HARD_EXIT = time(15, 15)
@@ -45,11 +47,22 @@ class TradePlan(BaseModel):
     broker_allows_trade: bool = True
     evidence: list[str] = Field(default_factory=list)
     evaluated_at_ist: datetime | None = None
+    # SWING funding is deliberately explicit. Old/historical plans may omit it; such a
+    # current SWING candidate remains WAIT until funding/economics are reviewed.
+    swing_funding: SwingFunding | None = None
+    mtf_eligible_verified: bool | None = None
+    funded_amount: float | None = Field(default=None, ge=0)
+    available_cash: float | None = Field(default=None, ge=0)
 
     @field_validator("mode", mode="before")
     @classmethod
     def normalize_mode_for_legacy_replay_storage(cls, value: str) -> str:
         return to_legacy_mode(value)
+
+    @field_validator("swing_funding", mode="before")
+    @classmethod
+    def normalize_swing_funding(cls, value: str | None) -> str | None:
+        return to_swing_funding(value) if value is not None else None
 
 
 class GateResult(BaseModel):
@@ -68,6 +81,10 @@ class GateResult(BaseModel):
     soft_parameter_registry_applied: bool = False
     evidence_count: int = 0
     evaluated_at_ist: str
+    swing_funding: SwingFunding | None = None
+    funding_review_required: bool = False
+    mtf_eligible_verified: bool | None = None
+    funded_amount: float | None = None
 
 
 def _now_ist(value: datetime | None) -> datetime:
@@ -95,6 +112,8 @@ def evaluate_trade_plan(plan: TradePlan, *, db_path: str | None = None) -> GateR
     warnings: list[str] = []
     now = _now_ist(plan.evaluated_at_ist)
     active_mode = to_active_mode(plan.mode)
+    action: Literal["PASS", "WAIT", "BLOCK", "HARD_EXIT"] = "PASS"
+    funding_review_required = False
 
     if plan.direction == "LONG":
         if not (plan.stop_loss < plan.entry < plan.take_profit):
@@ -104,7 +123,7 @@ def evaluate_trade_plan(plan: TradePlan, *, db_path: str | None = None) -> GateR
             failures.append("SHORT requires take_profit < entry < stop_loss")
 
     if active_mode == "SWING" and plan.direction == "SHORT":
-        failures.append("SWING_POSITION short is not allowed; active mode SWING is LONG cash/delivery equity only")
+        failures.append("SWING short is not allowed; active SWING mode is LONG-only equity")
 
     if not plan.broker_allows_trade:
         failures.append("Broker/exchange rule does not allow this trade")
@@ -120,10 +139,20 @@ def evaluate_trade_plan(plan: TradePlan, *, db_path: str | None = None) -> GateR
         elif clock >= INTRADAY_NO_FRESH_ENTRY:
             failures.append("No fresh INTRADAY entry from 15:10 IST; exit window is active")
             action = "BLOCK"
-        else:
-            action = "PASS"
     else:
-        action = "PASS"
+        if plan.swing_funding is None:
+            funding_review_required = True
+            warnings.append("SWING funding not specified; choose CNC_OWN_CASH or verified MTF before treating the candidate as actionable")
+        elif plan.swing_funding == "MTF":
+            if plan.mtf_eligible_verified is not True:
+                failures.append("MTF SWING requires current broker/security MTF eligibility to be verified")
+            if plan.funded_amount is None or plan.funded_amount <= 0:
+                funding_review_required = True
+                warnings.append("MTF funded_amount is missing; financing cost cannot be modeled yet")
+        elif plan.swing_funding == "CNC_OWN_CASH":
+            required_cash = (float(plan.entry) * int(plan.quantity)) if plan.quantity is not None else None
+            if required_cash is not None and plan.available_cash is not None and plan.available_cash < required_cash:
+                failures.append("CNC_OWN_CASH selected but available_cash is below modeled position value")
 
     rr = _reward_risk(plan)
     soft = effective_reward_risk_preference(active_mode, db_path=db_path)
@@ -153,7 +182,7 @@ def evaluate_trade_plan(plan: TradePlan, *, db_path: str | None = None) -> GateR
         allowed = False
     else:
         allowed = True
-        if rr is not None and rr < preferred:
+        if (rr is not None and rr < preferred) or funding_review_required:
             action = "WAIT"
 
     return GateResult(
@@ -170,4 +199,8 @@ def evaluate_trade_plan(plan: TradePlan, *, db_path: str | None = None) -> GateR
         soft_parameter_registry_applied=bool(soft.get("registry_applied")),
         evidence_count=len(plan.evidence),
         evaluated_at_ist=now.isoformat(),
+        swing_funding=plan.swing_funding if active_mode == "SWING" else None,
+        funding_review_required=funding_review_required,
+        mtf_eligible_verified=plan.mtf_eligible_verified if active_mode == "SWING" else None,
+        funded_amount=plan.funded_amount if active_mode == "SWING" else None,
     )
