@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.tradebrain.study_cycle import run_after_market_study
+from backend.tradebrain.study_cycle_v2 import run_after_market_study_v2
 
 
 def _reload_env() -> None:
@@ -29,21 +29,26 @@ def _reload_env() -> None:
 
 def _print_result(result: dict) -> None:
     safe = dict(result)
-    # Study-cycle results never contain credentials, but keep console output concise.
-    if safe.get("status") == "SUCCESS":
+    if safe.get("status") in {"SUCCESS", "SUCCESS_WITH_RESEARCH_WARNINGS"}:
         history = safe.get("history") or {}
-        replay = safe.get("replay") or {}
-        prospective = safe.get("prospective_hypothesis") or {}
+        mtf_wrap = safe.get("multi_timeframe") or {}
+        mtf = mtf_wrap.get("result") if mtf_wrap.get("status") == "SUCCESS" else {}
+        pattern_wrap = safe.get("pattern_lab_15m") or {}
+        pattern = pattern_wrap.get("result") if pattern_wrap.get("status") == "SUCCESS" else {}
+        candle_shapes = pattern.get("candlestick_shapes") or {}
         print(json.dumps({
             "status": safe.get("status"),
             "method_version": safe.get("method_version"),
             "ist_date": safe.get("ist_date"),
             "bootstrap": safe.get("bootstrap"),
             "series_id": safe.get("series_id"),
-            "daily_rows": (history.get("daily") or {}).get("rows_received"),
-            "five_minute_rows": (history.get("five_minute") or {}).get("rows_received"),
-            "replay": replay,
-            "prospective": prospective.get("summary") or prospective,
+            "fifteen_minute_rows": (history.get("fifteen_minute") or {}).get("rows_received"),
+            "sixty_minute_rows": (history.get("sixty_minute") or {}).get("rows_received"),
+            "mtf_alignment": mtf.get("alignment"),
+            "opening_gap": mtf.get("opening_gap"),
+            "pattern_occurrences": {name: item.get("occurrences") for name, item in candle_shapes.items()},
+            "fvg": pattern.get("fair_value_gaps"),
+            "research_warnings": safe.get("research_warnings") or [],
             "audit_txt": safe.get("audit_txt"),
             "order_execution_allowed": False,
         }, ensure_ascii=False, default=str))
@@ -58,6 +63,8 @@ def main() -> int:
     parser.add_argument("--poll-seconds", type=int, default=900, help="Loop check interval; minimum 60 seconds")
     parser.add_argument("--bootstrap-daily-days", type=int, default=3650)
     parser.add_argument("--bootstrap-5m-days", type=int, default=1825)
+    parser.add_argument("--bootstrap-15m-days", type=int, default=1825)
+    parser.add_argument("--bootstrap-60m-days", type=int, default=1825)
     parser.add_argument("--incremental-days", type=int, default=14)
     args = parser.parse_args()
     if args.poll_seconds < 60:
@@ -66,22 +73,25 @@ def main() -> int:
     last_console_signature = None
     while True:
         _reload_env()
-        result = run_after_market_study(
+        result = run_after_market_study_v2(
             force=args.force,
             bootstrap_daily_days=args.bootstrap_daily_days,
             bootstrap_5m_days=args.bootstrap_5m_days,
+            bootstrap_15m_days=args.bootstrap_15m_days,
+            bootstrap_60m_days=args.bootstrap_60m_days,
             incremental_days=args.incremental_days,
         )
         signature = (result.get("status"), result.get("ist_date"), result.get("error_type"))
-        if signature != last_console_signature or result.get("status") in {"SUCCESS", "FAILED", "KITE_AUTH_REQUIRED"}:
+        terminal_statuses = {"SUCCESS", "SUCCESS_WITH_RESEARCH_WARNINGS", "FAILED", "KITE_AUTH_REQUIRED", "BASE_CYCLE_NOT_READY"}
+        if signature != last_console_signature or result.get("status") in terminal_statuses:
             _print_result(result)
             sys.stdout.flush()
             last_console_signature = signature
 
         if not args.loop:
-            return 0 if result.get("status") in {"SUCCESS", "ALREADY_COMPLETED_TODAY", "SKIPPED_NOT_STUDY_TIME"} else 1
-        # --force in loop mode would deliberately repeat the full expensive cycle, so
-        # force applies only to the first pass.
+            okay = {"SUCCESS", "SUCCESS_WITH_RESEARCH_WARNINGS", "ALREADY_COMPLETED_TODAY", "SKIPPED_NOT_STUDY_TIME"}
+            return 0 if result.get("status") in okay else 1
+        # --force in loop mode deliberately applies only to the first pass.
         args.force = False
         time.sleep(args.poll_seconds)
 
