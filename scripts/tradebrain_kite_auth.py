@@ -6,7 +6,9 @@ Kite login/token exchange, saves the resulting session values to the repository-
 ignored .env file, and validates the session with a read-only quote request.
 
 The API secret is prompted without echo unless it already exists in the local process
-or local .env. It is NOT written to .env by this helper.
+or local .env. It is NOT written to .env by this helper. The short-lived redirect URL
+or request_token is accepted through a normal console input so Windows clipboard paste
+works reliably.
 """
 
 from __future__ import annotations
@@ -201,8 +203,9 @@ def main() -> int:
     login_url = f"{KITE_LOGIN_URL}?{urllib.parse.urlencode({'v': '3', 'api_key': api_key})}"
     print("\n1) Complete the Zerodha login in your browser.")
     print("2) After redirect, copy the ENTIRE address-bar URL (easiest), or only the request_token value.")
-    print("3) Return here, paste it at the hidden prompt, then press Enter.")
-    print("   Nothing will appear while you paste because the prompt is intentionally hidden.")
+    print("3) Return here, paste it at the normal prompt, then press Enter immediately.")
+    print("   The pasted URL WILL be visible locally so Windows Ctrl+V works reliably.")
+    print("   Do not share a screenshot containing the URL/request_token before completing the exchange.")
     print("   If your redirect is http://127.0.0.1/ and the browser says it cannot connect, that is okay; copy the address bar anyway.\n")
     print(f"Login URL: {login_url}\n")
     if not args.no_browser:
@@ -211,10 +214,10 @@ def main() -> int:
         except Exception:
             pass
 
-    pasted = getpass.getpass("Paste redirect URL or request_token (hidden): ")
+    pasted = input("Paste redirect URL or request_token: ")
     request_token = extract_request_token(pasted)
     if len(request_token) < 10:
-        print("No valid request_token was pasted. Re-run the helper, complete a fresh Zerodha login, then paste the full redirected URL at the hidden prompt and press Enter.", file=sys.stderr)
+        print("No valid request_token was pasted. Re-run the helper, complete a fresh Zerodha login, paste the full redirected URL at the prompt, and press Enter.", file=sys.stderr)
         return 2
 
     checksum = hashlib.sha256(f"{api_key}{request_token}{api_secret}".encode("utf-8")).hexdigest()
