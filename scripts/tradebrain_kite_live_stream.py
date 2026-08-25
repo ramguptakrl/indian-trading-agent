@@ -61,7 +61,7 @@ async def main() -> None:
         "mode": mode,
         "subscriptions": [f"{ex}:{sym}" for ex, sym in token_map.values()],
         "order_api_enabled": False,
-    }))
+    }), flush=True)
 
     async for tick in stream.stream(list(token_map), mode=mode):
         identity = token_map.get(int(tick["instrument_token"]))
@@ -76,7 +76,7 @@ async def main() -> None:
             "exchange_timestamp": saved.get("exchange_timestamp"),
             "received_at": saved["received_at"],
             "source": "ZERODHA_KITE_WEBSOCKET_MARKET_DATA_ONLY",
-        }))
+        }), flush=True)
 
 
 if __name__ == "__main__":
