@@ -136,3 +136,61 @@ For candlestick patterns, FVG, Fibonacci, volume profile, indicator combinations
 8. retain the old version and evidence trail.
 
 This prevents Trade Brain from becoming an indicator collection instead of a BSE-specific decision engine.
+
+## 15. Exchange microstructure and abnormal-event guards — added 2026-08-25
+
+These are mandatory live safety inputs, not optional indicators.
+
+### 15.1 Price bands / upper-lower circuit awareness
+
+- Trade Brain must know the exchange-applicable price band or dynamic operating range for `NSE:BSE` for the current session and must not assume a fixed 5%, 10% or 20% circuit.
+- NSE states that securities on which derivative products are available do not have a normal static daily price band; a 10% dynamic/dummy operating range is used for erroneous-order protection and can be flexed by the Exchange. BSE Ltd is a derivatives-eligible underlying, so runtime must treat the current exchange range/status as dynamic data rather than a hardcoded stock circuit percentage.
+- Track distance to current upper/lower permissible range and label states such as `NORMAL`, `NEAR_UPPER_RANGE`, `NEAR_LOWER_RANGE`, `AT_RANGE`, `RANGE_FLEX_PENDING/UNKNOWN` when evidence permits.
+- Near a band/range, reduce confidence in market-order-style execution assumptions, model slippage/liquidity risk, and do not assume a stop can fill at its exact trigger price.
+- For an OPEN position, hitting/approaching a lower range is an immediate Position Guardian risk event; hitting an upper range may affect exit liquidity and should not be treated as guaranteed realizable profit.
+- Historical backtests must use the price-band/range regime that applied at that date when such data is available; otherwise explicitly mark the limitation.
+- Current status: NOT IMPLEMENTED as a live guard.
+
+### 15.2 Market-wide circuit breaker / coordinated halt awareness
+
+- Monitor NIFTY 50 and BSE SENSEX market-wide circuit-breaker state. Current SEBI/NSE framework uses 10%, 15% and 20% moves in either direction, triggered by whichever of NIFTY 50 or SENSEX breaches first, with halt duration depending on trigger level and time of day.
+- When a market-wide circuit breaker is triggered, immediately enter `MARKET_HALTED` / risk-only state: no fresh-trade advisory, freeze normal setup timers, preserve OPEN trades, and show that execution is unavailable until the official reopen/pre-open process permits trading.
+- After reopening, require fresh market structure/liquidity confirmation before reactivating an old entry thesis; do not blindly continue a pre-halt signal.
+- A 20% market-wide breaker means remainder-of-day halt under the current framework.
+- Current status: NOT IMPLEMENTED as a live state machine.
+
+### 15.3 Instrument/exchange halt, suspension and feed-outage distinction
+
+- Distinguish at least: `MARKET_CLOSED`, `MARKET_WIDE_HALT`, `INSTRUMENT_SUSPENDED/HALTED`, `EXCHANGE_OUTAGE`, `DATA_FEED_STALE`, and `LOCAL_NETWORK/API_FAILURE`.
+- Missing ticks alone must never be interpreted as a market halt. Confirm using exchange/session status or an independent permitted source when possible.
+- If status cannot be verified, fail closed for new advisories and label the reason `MARKET_STATUS_UNVERIFIED` rather than guessing.
+- Resume only after official/verified session state and fresh data are restored.
+- Current status: PARTIAL for stale-data handling; full halt/outage classification is missing.
+
+### 15.4 Freak-trade / abnormal-tick protection
+
+- A single abnormal print must not be allowed to create a new setup, trip an early-exit recommendation, move a stop/target model, or teach the research engine without confirmation.
+- Use Kite `full` WebSocket mode for BSE when practical because it includes LTP, quantities, timestamps and 5x5 market depth; these fields can support anomaly validation without REST polling.
+- Build a deterministic `FREAK_TICK_SUSPECT` detector using a combination of: deviation from stable recent price, spread/depth inconsistency, abnormal jump relative to short-horizon volatility/ATR, tiny or anomalous traded quantity, timestamp/order-book consistency, and rapid snap-back/confirmation ticks.
+- Thresholds must be empirically calibrated for BSE Ltd; do not hardcode a generic percentage as the definition of a freak trade.
+- On suspicion, quarantine the tick from decision-state changes for a short confirmation window while retaining it in a raw audit stream. Confirm with subsequent ticks/depth and, when necessary and rate limits allow, a read-only quote check or independent permitted source.
+- If confirmed genuine, release the event immediately as a real volatility/price-break event. If rejected as anomalous, preserve the evidence and exclusion reason for research audit.
+- Do not rewrite historical raw market data. Store a separate quality/anomaly label so future research can revisit the decision.
+- Current status: DATA SUPPORT EXISTS (Kite full-mode depth parser); detector is NOT IMPLEMENTED.
+
+### 15.5 Opening gap-up / gap-down operationalization
+
+- Trade Brain already has a versioned BSE opening-gap exploratory study using previous close versus session open and measuring gap fill, reversal, continuation and close-through behavior at 0.5%, 1.0% and 1.5% thresholds.
+- Promote gap state into the live opening context only after a valid current-session open/price is confirmed: `GAP_UP`, `GAP_DOWN`, `FLAT/IMMATERIAL`, magnitude %, previous close, open, gap-fill level and whether the gap conflicts with the 1D/4H trend.
+- A gap is context, not an automatic trade signal. Entry still requires 1H/15m setup evidence and live liquidity/market-state validation.
+- Study BSE-specific behavior by gap magnitude, direction, regime, news/event presence, volume, first-15m behavior and eventual fill/continuation. Freeze any live threshold before promotion.
+- Gap logic must be corporate-action/price-era aware so splits/bonuses or non-comparable price eras do not create fake gaps.
+- Current status: EXPLORATORY GAP STUDY IMPLEMENTED; LIVE GAP GUARD/FEATURE NOT YET IMPLEMENTED.
+
+### 15.6 Priority ordering
+
+When signals conflict, exchange/microstructure safety outranks technical conviction:
+
+`MARKET/INSTRUMENT HALT` > `PRICE-RANGE/CIRCUIT CONSTRAINT` > `DATA QUALITY / FREAK-TICK GUARD` > `OPEN-POSITION RISK` > `BROKER/REGULATORY/FUNDING RULES` > `TECHNICAL SETUP` > `LLM OPINION`.
+
+No LLM, indicator, confidence score or historical win rate may override a verified halt, exchange constraint, invalid/stale data state or broker/regulatory hard rule.
