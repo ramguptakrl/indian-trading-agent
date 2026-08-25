@@ -119,6 +119,7 @@ jobs:
           python -m pip install
           "fastapi>=0.115,<1"
           "pydantic>=2,<3"
+          "pytest>=8,<10"
           "requests>=2.32"
           "pypdf>=5,<7"
           "stockstats>=0.6.5"
@@ -161,12 +162,12 @@ jobs:
           tradingagents/agents/managers/portfolio_manager.py
       - name: Validate one-button launcher syntax
         run: bash -n start.sh
-      - name: Run Trade Brain tests + write TXT interpretation
+      - name: Run all Trade Brain tests + write TXT interpretation
         shell: bash
         run: |
           mkdir -p artifacts/audit
           set +e
-          python -m unittest discover -s tests -p "test_tradebrain_*.py" -v 2>&1 | tee artifacts/audit/tradebrain-tests.txt
+          python -m pytest -q tests/test_tradebrain_*.py 2>&1 | tee artifacts/audit/tradebrain-tests.txt
           status=${PIPESTATUS[0]}
           set -e
           python scripts/tradebrain_test_interpretation.py \
