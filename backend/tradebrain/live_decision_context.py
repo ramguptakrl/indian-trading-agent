@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from backend.tradebrain.corporate_action_eras import sync_official_bse_split_price_eras
 from backend.tradebrain.kite_data import KITE_SOURCE_KEY
 from backend.tradebrain.market_data_store import find_series
 from backend.tradebrain.multi_timeframe import multi_timeframe_snapshot
@@ -64,6 +65,15 @@ def build_bse_decision_context(
             "order_execution_allowed": False,
         }
 
+    # Before any raw-price comparison, let explicit official split ex-dates define the
+    # authoritative comparability eras for this audited series. This is idempotent and
+    # never changes OHLC values. Dividends do not create a new era.
+    official_eras = sync_official_bse_split_price_eras(
+        str(series["series_id"]),
+        known_by=as_of,
+        db_path=db_path,
+    )
+
     snapshot = multi_timeframe_snapshot(
         str(series["series_id"]),
         as_of=as_of,
@@ -92,6 +102,7 @@ def build_bse_decision_context(
         "alignment": snapshot.get("alignment"),
         "opening_gap": snapshot.get("opening_gap"),
         "corporate_action_context": snapshot.get("corporate_action_context"),
+        "official_split_price_eras": official_eras,
         "missing_frames": missing,
         "candidate_evidence_complete": complete,
         "price_comparability_block": structural_break,
@@ -131,6 +142,7 @@ def decision_context_for_prompt(context: dict[str, Any]) -> str:
     lines.append(f"Alignment: {context.get('alignment')}")
     lines.append(f"Opening gap: {context.get('opening_gap')}")
     lines.append(f"Corporate action context: {context.get('corporate_action_context')}")
+    lines.append(f"Official split price eras: {context.get('official_split_price_eras')}")
     if context.get("missing_frames"):
         lines.append(f"Missing/incomplete frames: {context.get('missing_frames')}")
     if context.get("price_comparability_block"):
