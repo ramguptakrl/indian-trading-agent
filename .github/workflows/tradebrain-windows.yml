@@ -5,6 +5,7 @@ on:
     paths:
       - "Start-TradeBrain.ps1"
       - "Start-TradeBrain.bat"
+      - "scripts/Migrate-TradeBrainData.ps1"
       - "WINDOWS_SETUP.md"
       - ".github/workflows/tradebrain-windows.yml"
       - "pyproject.toml"
@@ -18,6 +19,7 @@ on:
     paths:
       - "Start-TradeBrain.ps1"
       - "Start-TradeBrain.bat"
+      - "scripts/Migrate-TradeBrainData.ps1"
       - "WINDOWS_SETUP.md"
       - ".github/workflows/tradebrain-windows.yml"
       - "pyproject.toml"
@@ -46,19 +48,21 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Parse PowerShell launcher
+      - name: Parse PowerShell scripts
         shell: powershell
         run: |
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path '.\Start-TradeBrain.ps1'),
-            [ref]$tokens,
-            [ref]$errors
-          ) | Out-Null
-          if ($errors.Count -gt 0) {
-            $errors | Format-List | Out-String | Write-Error
-            exit 1
+          foreach ($file in @('.\Start-TradeBrain.ps1', '.\scripts\Migrate-TradeBrainData.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List | Out-String | Write-Error
+              exit 1
+            }
           }
 
       - name: Launcher prerequisite preflight
