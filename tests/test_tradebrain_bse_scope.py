@@ -77,6 +77,41 @@ class TradeBrainBseScopeTests(unittest.TestCase):
         for removed in ("Top Picks", "Market Scan", "Verdict Calibration", "Shadow Trades", "AI Backtest"):
             self.assertNotIn(removed, sidebar)
 
+    def test_frontend_route_surface_is_bse_product_only(self):
+        app_root = ROOT / "frontend" / "src" / "app"
+        actual = {
+            path.relative_to(app_root).as_posix()
+            for path in app_root.rglob("page.tsx")
+        }
+        expected = {
+            "page.tsx",
+            "analysis/page.tsx",
+            "analysis/[id]/page.tsx",
+            "charts/page.tsx",
+            "history/page.tsx",
+            "insights/page.tsx",
+            "news/page.tsx",
+            "settings/page.tsx",
+            "trades/page.tsx",
+        }
+        self.assertEqual(actual, expected)
+        for dead_route in (
+            "backtest/page.tsx",
+            "confidence-calibration/page.tsx",
+            "memory-admin/page.tsx",
+            "performance/page.tsx",
+            "recommendations/page.tsx",
+            "scanner/page.tsx",
+            "shadow-trades/page.tsx",
+            "signals/page.tsx",
+            "simulation/page.tsx",
+            "strategies/page.tsx",
+            "strategies/cyclical/page.tsx",
+            "strategies/support-resistance/page.tsx",
+            "verdict-calibration/page.tsx",
+        ):
+            self.assertNotIn(dead_route, actual)
+
 
 if __name__ == "__main__":
     unittest.main()
