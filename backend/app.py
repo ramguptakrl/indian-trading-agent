@@ -1,26 +1,26 @@
 """FastAPI application for Trade Brain — BSE Ltd."""
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=True)
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
+
 from backend.db import ensure_db
 from backend.routers import (
-    market_data, analysis, watchlist, backtest, strategies, scanner, performance,
-    recommender, settings as settings_router, news as news_router,
-    simulation as simulation_router, insights as insights_router, fii_dii as fii_dii_router,
-    calendar as calendar_router, concentration as concentration_router,
-    daily_verdict as daily_verdict_router, signal_performance as signal_performance_router,
-    verdict_calibration as verdict_calibration_router, regime as regime_router,
-    confidence_calibration as confidence_calibration_router, shadow_trades as shadow_trades_router,
-    memory as memory_router, tradebrain as tradebrain_router,
+    analysis,
+    market_data,
+    news as news_router,
+    settings as settings_router,
+    tradebrain as tradebrain_router,
+    tradebrain_actual_trades as tradebrain_actual_trades_router,
+    tradebrain_evidence as tradebrain_evidence_router,
     tradebrain_phase3 as tradebrain_phase3_router,
     tradebrain_phase4 as tradebrain_phase4_router,
     tradebrain_phase5 as tradebrain_phase5_router,
@@ -29,26 +29,24 @@ from backend.routers import (
     tradebrain_phase8 as tradebrain_phase8_router,
     tradebrain_phase9 as tradebrain_phase9_router,
     tradebrain_phase10 as tradebrain_phase10_router,
-    tradebrain_evidence as tradebrain_evidence_router,
-    tradebrain_actual_trades as tradebrain_actual_trades_router,
 )
-from backend.settings_manager import load_api_keys_into_env, apply_llm_config_to_default
-from backend.tradebrain.store import ensure_tradebrain_schema
-from backend.tradebrain.security_store import ensure_security_master_schema
-from backend.tradebrain.corporate_event_store import ensure_corporate_event_schema
-from backend.tradebrain.market_data_store import ensure_market_data_schema
-from backend.tradebrain.focus_lab_store import ensure_focus_lab_schema
-from backend.tradebrain.challenger_store import ensure_challenger_schema
-from backend.tradebrain.regime_hardening import install_phase4_regime_hardening
-from backend.tradebrain.paper_ledger import ensure_paper_ledger_schema
-from backend.tradebrain.exchange_calendar import ensure_exchange_calendar_schema
-from backend.tradebrain.advisory_store import ensure_advisory_schema
-from backend.tradebrain.evidence_baseline import ensure_evidence_schema
-from backend.tradebrain.prospective_gap import ensure_prospective_gap_schema
-from backend.tradebrain.kite_stream import ensure_kite_live_schema
+from backend.settings_manager import apply_llm_config_to_default, load_api_keys_into_env
 from backend.tradebrain.actual_trade_journal import ensure_actual_trade_schema
-from backend.tradebrain.market_source_policy import market_source_status
+from backend.tradebrain.advisory_store import ensure_advisory_schema
 from backend.tradebrain.bse_scope import public_scope
+from backend.tradebrain.challenger_store import ensure_challenger_schema
+from backend.tradebrain.corporate_event_store import ensure_corporate_event_schema
+from backend.tradebrain.evidence_baseline import ensure_evidence_schema
+from backend.tradebrain.exchange_calendar import ensure_exchange_calendar_schema
+from backend.tradebrain.focus_lab_store import ensure_focus_lab_schema
+from backend.tradebrain.kite_stream import ensure_kite_live_schema
+from backend.tradebrain.market_data_store import ensure_market_data_schema
+from backend.tradebrain.market_source_policy import market_source_status
+from backend.tradebrain.paper_ledger import ensure_paper_ledger_schema
+from backend.tradebrain.prospective_gap import ensure_prospective_gap_schema
+from backend.tradebrain.regime_hardening import install_phase4_regime_hardening
+from backend.tradebrain.security_store import ensure_security_master_schema
+from backend.tradebrain.store import ensure_tradebrain_schema
 
 
 @asynccontextmanager
@@ -79,44 +77,30 @@ app = FastAPI(
         "BSE Ltd-only resident-Indian INTRADAY/SWING research with audited evidence, "
         "deterministic gating, broader-market context and broker execution disabled"
     ),
-    version="0.12.1",
+    version="0.13.0-bse",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Stage-1 BSE conversion keeps inherited routers mounted while the frontend is narrowed and
-# dependency usage is audited. Generic trade-discovery routes are no longer part of normal
-# product navigation and will be physically removed only after their BSE dependencies are
-# proven dead by CI. AnalysisRequest already enforces the BSE-only trade-target boundary.
+# BSE product runtime surface. The original generic ITA runtime remains preserved on `main`.
+# This branch intentionally does NOT mount legacy recommender/scanner/watchlist/backtest/
+# generic-simulation/calibration/shadow-trade/memory-admin APIs.
 app.include_router(market_data.router)
 app.include_router(analysis.router)
-app.include_router(watchlist.router)
-app.include_router(backtest.router)
-app.include_router(strategies.router)
-app.include_router(scanner.router)
-app.include_router(performance.router)
-app.include_router(recommender.router)
 app.include_router(settings_router.router)
 app.include_router(news_router.router)
-app.include_router(simulation_router.router)
-app.include_router(insights_router.router)
-app.include_router(fii_dii_router.router)
-app.include_router(calendar_router.router)
-app.include_router(concentration_router.router)
-app.include_router(daily_verdict_router.router)
-app.include_router(signal_performance_router.router)
-app.include_router(verdict_calibration_router.router)
-app.include_router(regime_router.router)
-app.include_router(confidence_calibration_router.router)
-app.include_router(shadow_trades_router.router)
-app.include_router(memory_router.router)
 app.include_router(tradebrain_router.router)
 app.include_router(tradebrain_phase3_router.router)
 app.include_router(tradebrain_phase4_router.router)
@@ -136,11 +120,11 @@ def health():
         "status": "ok",
         "service": "trade-brain-bse",
         "tradebrain_reframe": True,
-        "tradebrain_version": "0.12.1",
+        "tradebrain_version": "0.13.0-bse",
         "product_scope": public_scope(),
         "bse_only_trade_target": True,
         "broader_market_role": "CONTEXT_ONLY",
-        "legacy_ita_routes_temporarily_mounted_during_conversion": True,
+        "legacy_ita_trade_discovery_routes_mounted": False,
         "trader_profile": "RESIDENT_INDIAN",
         "active_trade_modes": ["INTRADAY", "SWING"],
         "mtf_enabled": False,
@@ -177,16 +161,30 @@ def health():
 @app.get("/api/config")
 def get_config():
     from tradingagents.default_config import DEFAULT_CONFIG
+
     safe_keys = [
-        "llm_provider", "deep_think_llm", "quick_think_llm",
-        "market", "default_exchange", "trading_style",
-        "max_debate_rounds", "max_risk_discuss_rounds",
-        "dry_run", "order_execution_enabled", "advisory_only",
-        "active_trade_modes", "intraday_no_fresh_entry", "intraday_hard_exit",
-        "trader_profile", "market_data_credential_role", "mtf_enabled",
-        "max_position_value", "max_loss_per_trade", "max_daily_loss",
+        "llm_provider",
+        "deep_think_llm",
+        "quick_think_llm",
+        "market",
+        "default_exchange",
+        "trading_style",
+        "max_debate_rounds",
+        "max_risk_discuss_rounds",
+        "dry_run",
+        "order_execution_enabled",
+        "advisory_only",
+        "active_trade_modes",
+        "intraday_no_fresh_entry",
+        "intraday_hard_exit",
+        "trader_profile",
+        "market_data_credential_role",
+        "mtf_enabled",
+        "max_position_value",
+        "max_loss_per_trade",
+        "max_daily_loss",
         "max_open_positions",
     ]
-    config = {k: DEFAULT_CONFIG.get(k) for k in safe_keys}
+    config = {key: DEFAULT_CONFIG.get(key) for key in safe_keys}
     config["product_scope"] = public_scope()
     return config
