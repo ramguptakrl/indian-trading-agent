@@ -23,6 +23,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Load local runtime configuration before importing Trade Brain modules. In particular,
+# TRADEBRAIN_DATA_DIR must be visible before backend.db resolves its SQLite path.
+load_dotenv(ROOT / ".env", override=True)
+
 from backend.tradebrain.study_cycle_v2 import run_after_market_study_v2
 
 

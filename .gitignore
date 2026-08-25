@@ -72,6 +72,7 @@ reference-repo/
 *.sqlite
 *.sqlite3
 .tradingagents/
+.tradebrain/
 *.log
 audit_txt/
 tradebrain-audit-*.txt
