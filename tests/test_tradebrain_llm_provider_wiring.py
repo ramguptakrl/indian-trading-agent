@@ -7,15 +7,21 @@ wiring statically instead of importing optional LangChain provider packages.
 from __future__ import annotations
 
 import os
+import runpy
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from backend import settings_manager
 from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.llm_clients.model_catalog import get_known_models
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _known_models_without_loading_llm_package() -> dict[str, list[str]]:
+    """Execute model_catalog.py directly so llm_clients/__init__ cannot import SDKs."""
+    namespace = runpy.run_path(str(ROOT / "tradingagents" / "llm_clients" / "model_catalog.py"))
+    return namespace["get_known_models"]()
 
 
 class TradeBrainLLMProviderWiringTests(unittest.TestCase):
@@ -31,7 +37,7 @@ class TradeBrainLLMProviderWiringTests(unittest.TestCase):
             settings_manager.PROVIDERS_INFO["groq"]["models_quick"],
             ["openai/gpt-oss-20b"],
         )
-        self.assertIn("openai/gpt-oss-20b", get_known_models()["groq"])
+        self.assertIn("openai/gpt-oss-20b", _known_models_without_loading_llm_package()["groq"])
 
     def test_groq_openai_compatible_adapter_is_wired_without_importing_optional_sdk(self):
         factory = (ROOT / "tradingagents" / "llm_clients" / "factory.py").read_text(encoding="utf-8")
