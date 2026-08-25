@@ -15,8 +15,10 @@ Trade target: BSE Ltd (`NSE:BSE`)
 
 - Kite WebSocket is preferred when authenticated/configured.
 - REST quote/history is supplemental and rate-governed.
-- Yahoo/yfinance remains explicitly labelled fallback/research data.
+- Yahoo/yfinance remains explicitly labelled fallback/research data only where permitted.
 - LLM analysis is event/material-change driven, not triggered on every tick.
+- Position Guardian requires a timestamped, fresh persisted Kite BSE quote before it may
+  interpret stop/target/HOLD risk. Missing, malformed or stale quote state fails closed.
 
 ## Technical/research stack
 
@@ -60,10 +62,20 @@ research features until they pass chronological validation.
 
 Priority:
 
-`HALT > PRICE RANGE > DATA QUALITY/FREAK TICK > OPEN-POSITION RISK > BROKER/FUNDING RULES > TECHNICAL SETUP > LLM OPINION`
+`SCOPE > HALT > PRICE RANGE > DATA QUALITY/FREAK TICK > OPEN-POSITION RISK > BROKER/FUNDING RULES > TECHNICAL SETUP > LLM OPINION`
 
 Missing ticks alone are not proof of a halt. Unknown critical market state blocks new
-advice rather than being guessed.
+advice rather than being guessed. Direct live-advisory callers are BSE/NSE scope-checked
+before market/policy evaluation.
+
+## Corporate-action rules
+
+- Official events remain permanent evidence even after inbox review/archive.
+- Explicit split/dividend dates and terms may be normalized from source text.
+- Record date, ex-date, payment date, split ratio and dividend amount are never invented.
+- An ex-date is never inferred from a record date.
+- Stock splits create raw-price comparability boundaries without rewriting stored OHLC.
+- Dividend ex-dates create economic review context, not split-style structural price eras.
 
 ## Learning
 
@@ -80,9 +92,18 @@ Every new concept:
 
 ## Actual trades
 
-Human-executed trades remain separate evidence. For SWING, journal/accounting work must
-become explicitly MTF-aware; it must not silently reuse own-cash delivery economics as a
-complete MTF result.
+Human-executed trades remain separate evidence from replay/paper research.
+
+Active SWING journal records are explicitly MTF-aware:
+
+- LONG only;
+- MTF eligibility verification recorded;
+- funded amount and user cash contribution retained separately;
+- explicit MTF interest-days used for estimates;
+- partial exit slices allocate modeled MTF costs proportionally;
+- broker-confirmed actual charge override may replace estimates for closed slices.
+
+The journal records what the human did externally; it never places broker orders.
 
 ## LLM roles
 
