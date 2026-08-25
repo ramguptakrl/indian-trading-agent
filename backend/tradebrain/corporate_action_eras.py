@@ -39,7 +39,8 @@ def _session_open_utc(day: str) -> str:
 def _official_split_boundaries(*, known_by: str | datetime | None, db_path: str | None) -> list[dict[str, Any]]:
     cutoff = _utc(known_by)
     boundaries: dict[str, dict[str, Any]] = {}
-    for event in list_events(limit=500, db_path=db_path):
+    # Inbox status is workflow metadata only. Split truth remains part of permanent memory.
+    for event in list_events(status=None, limit=500, db_path=db_path):
         action = normalize_corporate_action(event)
         if not action or action.get("action_type") != "STOCK_SPLIT" or not action.get("ex_date"):
             continue
@@ -61,7 +62,6 @@ def _official_split_boundaries(*, known_by: str | datetime | None, db_path: str 
                 else "OFFICIAL_EVENT_EXPLICIT_EX_DATE_RATIO_UNRESOLVED"
             ),
         }
-        # One structural boundary per ex-date. Prefer a record with an explicit ratio.
         existing = boundaries.get(effective_at)
         if existing is None or (existing.get("adjustment_factor") is None and candidate.get("adjustment_factor") is not None):
             boundaries[effective_at] = candidate
@@ -162,8 +162,6 @@ def sync_official_bse_split_price_eras(
             )
             eras.append({"era_id": era_id, "starts_at": start, "ends_at": end})
 
-        # Official eras intentionally overwrite vendor-derived era_id assignments. Raw OHLC
-        # remains untouched; strict replay can now reject cross-era comparisons uniformly.
         for era in eras:
             clauses = ["series_id=?"]
             args: list[Any] = [series_id]
