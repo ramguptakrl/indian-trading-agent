@@ -1,22 +1,7 @@
 import functools
 
 from tradingagents.agents.utils.agent_utils import build_instrument_context
-
-
-def _horizon_instruction(requested_trade_mode: str | None) -> str:
-    mode = str(requested_trade_mode or "").strip().upper()
-    if mode == "INTRADAY":
-        return """**Dedicated horizon for this run: INTRADAY**
-Evaluate INTRADAY independently. For any new candidate, `Trade Mode` MUST be INTRADAY.
-Do not switch to SWING because the intraday setup is weak; use HOLD / WAIT or NO TRADE instead.
-INTRADAY may be LONG or SHORT, but a SHORT requires its own bearish setup and remains same-session only."""
-    if mode == "SWING":
-        return """**Dedicated horizon for this run: SWING**
-Evaluate SWING independently. For any new candidate, `Trade Mode` MUST be SWING and `Direction` MUST be LONG.
-Do not switch to INTRADAY or SHORT because the swing setup is weak; use HOLD / WAIT or NO TRADE instead.
-Active SWING funding is Zerodha MTF only. Never invent current MTF eligibility, funded amount, leverage, margin percentage, or holding/interest days."""
-    return """**Horizon selection for this legacy run**
-INTRADAY and SWING are the only active horizons. Choose at most one new-candidate horizon from supplied evidence, or use HOLD / WAIT / NO TRADE. The BSE dual-horizon API runs them independently when both are required."""
+from tradingagents.horizon_policy import horizon_instruction
 
 
 def create_trader(llm, memory, requested_trade_mode: str | None = None):
@@ -39,10 +24,10 @@ def create_trader(llm, memory, requested_trade_mode: str | None = None):
         else:
             past_memory_str = "No past memories found."
 
-        horizon_instruction = _horizon_instruction(requested_trade_mode)
+        horizon_context = horizon_instruction(requested_trade_mode)
         context = {
             "role": "user",
-            "content": f"Based on a comprehensive analysis by a team of analysts, here is a research plan for {company_name}. {instrument_context} This plan incorporates current technical, macro, news, fundamentals, and sentiment evidence. Use it as evidence for a candidate trade plan; do not treat the research plan itself as permission to trade.\n\n{horizon_instruction}\n\nProposed Research Plan: {investment_plan}\n\nProduce a precise candidate for the dedicated horizon or say NO TRADE / WAIT when the evidence or geometry is inadequate.",
+            "content": f"Based on a comprehensive analysis by a team of analysts, here is a research plan for {company_name}. {instrument_context} This plan incorporates current technical, macro, news, fundamentals, and sentiment evidence. Use it as evidence for a candidate trade plan; do not treat the research plan itself as permission to trade.\n\n{horizon_context}\n\nProposed Research Plan: {investment_plan}\n\nProduce a precise candidate for the dedicated horizon or say NO TRADE / WAIT when the evidence or geometry is inadequate.",
         }
 
         messages = [
@@ -50,7 +35,7 @@ def create_trader(llm, memory, requested_trade_mode: str | None = None):
                 "role": "system",
                 "content": f"""You are the Trader research agent for Trade Brain's **BSE Ltd-only resident-Indian equity research system**. Your job is to convert evidence into a STRUCTURED ADVISORY CANDIDATE. You do not authorize or execute orders. A deterministic hard-rule arbiter sits above your output and may BLOCK it.
 
-{horizon_instruction}
+{horizon_context}
 
 **Only two active trade horizons**
 - **INTRADAY**: LONG or SHORT, same cash-market session only. A new candidate must have explicit Entry, Stop-Loss, and Take-Profit. No fresh INTRADAY entry is allowed from 15:10 IST and INTRADAY exposure must be flat before 15:15 IST. If current time makes INTRADAY invalid, say NO TRADE / EXIT.
