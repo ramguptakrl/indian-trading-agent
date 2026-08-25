@@ -208,6 +208,8 @@ def run_after_market_study_v2(
         if not series_id:
             raise ValueError("V2 study could not resolve the audited NSE:BSE market series")
 
+        # Broader-market evidence is additive context. Its absence must never convert a
+        # successful BSE study into a failed/warned BSE study or be guessed from web data.
         nifty_sync = _safe_research(
             sync_kite_nifty50_daily,
             from_time=current - timedelta(days=days_nifty),
@@ -229,19 +231,23 @@ def run_after_market_study_v2(
         )
         broader_market = _safe_research(nifty50_correction_context, as_of=current, db_path=db_path)
 
-        named_research = (
+        core_research = (
             ("multi_timeframe", mtf),
             ("patterns_15m", patterns_15m),
             ("patterns_daily", patterns_daily),
             ("structure_lab", structure),
             ("news_memory", news_memory),
-            ("nifty50_context_sync", nifty_sync),
-            ("broader_market_context", broader_market),
         )
-        warnings = [name for name, item in named_research if item.get("status") != "SUCCESS"]
-        if broader_market.get("status") == "SUCCESS" and (broader_market.get("result") or {}).get("status") != "AUDITED_NIFTY_DAILY_CONTEXT":
-            warnings.append("broader_market_context_incomplete")
-        final_status = "SUCCESS" if not warnings else "SUCCESS_WITH_RESEARCH_WARNINGS"
+        core_warnings = [name for name, item in core_research if item.get("status") != "SUCCESS"]
+        context_warnings: list[str] = []
+        if nifty_sync.get("status") != "SUCCESS":
+            context_warnings.append("nifty50_context_sync")
+        if broader_market.get("status") != "SUCCESS":
+            context_warnings.append("broader_market_context")
+        elif (broader_market.get("result") or {}).get("status") != "AUDITED_NIFTY_DAILY_CONTEXT":
+            context_warnings.append("broader_market_context_incomplete")
+
+        final_status = "SUCCESS" if not core_warnings else "SUCCESS_WITH_RESEARCH_WARNINGS"
         result = {
             "status": final_status,
             "method_version": METHOD_VERSION,
@@ -266,7 +272,9 @@ def run_after_market_study_v2(
             "structure_lab": structure,
             "news_memory": news_memory,
             "broader_market_context": broader_market,
-            "research_warnings": sorted(set(warnings)),
+            "research_warnings": sorted(set(core_warnings)),
+            "optional_context_warnings": sorted(set(context_warnings)),
+            "bse_study_success_independent_of_optional_broader_market_context": True,
             "api_governor": KITE_API_GOVERNOR.snapshot(),
             "learning_boundary": {
                 "llm_weights_modified": False,
@@ -285,8 +293,9 @@ def run_after_market_study_v2(
             interpretation=(
                 "V2 preserved the V1 replay/prospective study and added audited 15m/60m history, "
                 "D-4H-1H-15m context, candlestick/FVG research, Fibonacci/candle-volume structure "
-                "research, point-in-time news memory, and context-only audited Kite NIFTY 50 daily "
-                "evidence. No live policy or broker authority changed."
+                "research, point-in-time news memory, and optional context-only audited Kite NIFTY 50 "
+                "daily evidence. Missing NIFTY context does not invalidate the BSE study. No live policy "
+                "or broker authority changed."
             ),
         )
         result["audit_txt"] = audit_path
