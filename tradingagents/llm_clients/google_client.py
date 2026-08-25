@@ -24,9 +24,13 @@ class GoogleClient(BaseLLMClient):
         super().__init__(model, base_url, **kwargs)
 
     def get_llm(self) -> Any:
-        """Return configured ChatGoogleGenerativeAI instance."""
+        """Return configured ChatGoogleGenerativeAI with bounded transient retries."""
         self.warn_if_unknown_model()
-        llm_kwargs = {"model": self.model}
+        llm_kwargs = {
+            "model": self.model,
+            "timeout": 60,
+            "max_retries": 2,
+        }
 
         if self.base_url:
             llm_kwargs["base_url"] = self.base_url
