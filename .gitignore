@@ -73,6 +73,9 @@ reference-repo/
 *.sqlite3
 .tradingagents/
 *.log
+audit_txt/
+tradebrain-audit-*.txt
+artifacts/audit/
 
 # ====================================
 # Claude Code
