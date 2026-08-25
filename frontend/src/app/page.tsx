@@ -120,12 +120,12 @@ function ModeDecisionCard({ mode, plan }: { mode: "INTRADAY" | "SWING"; plan: Mo
           <div>
             <CardTitle className="text-base flex items-center gap-2">
               {mode}
-              <Badge variant="outline">{mode === "INTRADAY" ? "Same session" : "LONG-only delivery"}</Badge>
+              <Badge variant="outline">{mode === "INTRADAY" ? "Same session" : "LONG-only · Zerodha MTF"}</Badge>
             </CardTitle>
             <p className="mt-1 text-xs text-muted-foreground">
               {mode === "INTRADAY"
                 ? "No fresh entries from 15:10 IST · intended flat by 15:15 IST"
-                : "Own-cash swing only · no MTF/funded delivery"}
+                : "MTF-funded SWING only · current eligibility, funded amount and holding-cost scenario must be verified"}
             </p>
           </div>
           <Badge
