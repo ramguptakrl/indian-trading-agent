@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
+from backend.tradebrain.audit_txt import audit_learning
 from backend.tradebrain.evidence_baseline import build_evidence_baseline, latest_evidence_baseline
 from backend.tradebrain.market_data_store import find_series
 from backend.tradebrain.prospective_gap import (
@@ -27,12 +28,29 @@ def evidence_baseline(
     if series is None:
         raise HTTPException(status_code=404, detail="No audited market series found; sync market data first")
     try:
-        return build_evidence_baseline(
+        result = build_evidence_baseline(
             series["series_id"],
             as_of=as_of,
             intraday_interval=intraday_interval,
             persist=persist,
         )
+        audit_learning(
+            "EVIDENCE_BASELINE_BUILT",
+            {
+                "exchange": exchange.upper(),
+                "symbol": symbol.upper(),
+                "series_id": series["series_id"],
+                "as_of": as_of,
+                "intraday_interval": intraday_interval,
+                "persist": persist,
+                "result": result,
+            },
+            interpretation=(
+                "Descriptive evidence update only. It may inform later hypotheses, but it does not by itself "
+                "establish strategy edge, win rate, or trade authorization."
+            ),
+        )
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -60,12 +78,28 @@ def prospective_gap_check(
     if series is None:
         raise HTTPException(status_code=404, detail="No audited market series found")
     try:
-        return collect_prospective_gap_observations(
+        result = collect_prospective_gap_observations(
             series["series_id"],
             as_of=as_of,
             persist=persist,
             require_verified_calendar=True,
         )
+        audit_learning(
+            "PROSPECTIVE_GAP_001_CHECK",
+            {
+                "exchange": exchange.upper(),
+                "symbol": symbol.upper(),
+                "series_id": series["series_id"],
+                "as_of": as_of,
+                "persist": persist,
+                "result": result,
+            },
+            interpretation=(
+                "Prospective evidence is preserved as future-only validation. Pre-freeze observations must not be "
+                "backfilled to make the hypothesis appear validated; review only after the predefined evidence gates."
+            ),
+        )
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -100,4 +134,6 @@ def evidence_doctrine():
         "hypotheses_must_enter_frozen_future_or_untouched_validation_before_promotion": True,
         "trade_authorization": False,
         "order_execution_allowed": False,
+        "human_readable_txt_audit": True,
+        "hidden_chain_of_thought_persisted": False,
     }
