@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from backend.tradebrain.corporate_actions import corporate_action_context
 from backend.tradebrain.corporate_event_store import list_events
@@ -17,6 +18,7 @@ from backend.tradebrain.news_archive import query_news_known_by
 from backend.tradebrain.regime_hardening import classify_instrument_regime_recent
 
 METHOD_VERSION = "BSE_GUARDIAN_LOCAL_CONTEXT_V1"
+IST = ZoneInfo("Asia/Kolkata")
 _RANK = {"UNKNOWN": 0, "NORMAL": 1, "ELEVATED": 2, "HIGH": 3, "CRITICAL": 4}
 _CRITICAL_TERMS = (
     "trading halt", "suspension of trading", "insolvency", "bankruptcy", "default",
@@ -92,8 +94,6 @@ def _news_risk(news: list[dict[str, Any]], *, now: datetime) -> dict[str, Any]:
             continue
         text = f"{item.get('title') or ''} {item.get('summary') or ''}"
         item_risk = _text_risk(text)
-        # Ordinary BSE-direct headlines raise awareness but do not automatically force
-        # an early-exit review. Only explicit high-impact wording reaches HIGH/CRITICAL.
         if item_risk == "NORMAL":
             item_risk = "ELEVATED"
         risk = _max_risk(risk, item_risk)
@@ -135,7 +135,7 @@ def build_guardian_context(
     official = _event_risk(events, now=now)
     action = corporate_action_context(
         events,
-        session_date=now.date(),
+        session_date=now.astimezone(IST).date(),
         known_by=now,
     )
 
