@@ -6,7 +6,8 @@ param(
     [switch]$SkipInstall,
     [switch]$SetupOnly,
     [switch]$CheckOnly,
-    [switch]$SmokeTest
+    [switch]$SmokeTest,
+    [switch]$NoStudy
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,6 +37,8 @@ $FrontendOut = Join-Path $LogDir "frontend.out.log"
 $FrontendErr = Join-Path $LogDir "frontend.err.log"
 $KiteOut = Join-Path $LogDir "kite-live.out.log"
 $KiteErr = Join-Path $LogDir "kite-live.err.log"
+$StudyOut = Join-Path $LogDir "after-market-study.out.log"
+$StudyErr = Join-Path $LogDir "after-market-study.err.log"
 $VenvPython = Join-Path $RootDir "venv\Scripts\python.exe"
 
 function Write-Step([string]$Message) { Write-Host "[start] $Message" -ForegroundColor Cyan }
@@ -43,8 +46,6 @@ function Write-Ok([string]$Message)   { Write-Host "[ok]    $Message" -Foregroun
 function Write-Warn([string]$Message) { Write-Host "[warn]  $Message" -ForegroundColor Yellow }
 
 function Get-SystemPython {
-    # Prefer python.exe from PATH. This respects an explicitly configured
-    # interpreter (including actions/setup-python and normal Windows PATH).
     $python = Get-Command python.exe -ErrorAction SilentlyContinue
     if ($python) { return @{ File = $python.Source; Prefix = @() } }
 
@@ -228,6 +229,7 @@ Assert-PortFree -Port $FrontendPort
 $backendProcess = $null
 $frontendProcess = $null
 $kiteProcess = $null
+$studyProcess = $null
 
 try {
     Write-Step "Starting backend on port $BackendPort..."
@@ -240,6 +242,8 @@ try {
 
     $kiteReady = (& $VenvPython -c "from dotenv import dotenv_values; c=dotenv_values('.env'); ks=('KITE_API_KEY','KITE_ACCESS_TOKEN','KITE_LIVE_SUBSCRIPTIONS'); print('1' if all(str(c.get(k) or '').strip() for k in ks) else '0')").Trim()
     if ($LASTEXITCODE -ne 0) { $kiteReady = "0" }
+    $studyReady = (& $VenvPython -c "from dotenv import dotenv_values; c=dotenv_values('.env'); ks=('KITE_API_KEY','KITE_ACCESS_TOKEN'); print('1' if all(str(c.get(k) or '').strip() for k in ks) else '0')").Trim()
+    if ($LASTEXITCODE -ne 0) { $studyReady = "0" }
 
     if ($kiteReady -eq "1") {
         Write-Step "Starting Kite MARKET_DATA_ONLY live stream..."
@@ -253,7 +257,20 @@ try {
         Write-Step "Kite live stream not configured; labelled fallback policy remains available."
     }
 
-    # Keep the browser client pointed at the same backend port chosen here.
+    if (-not $NoStudy -and -not $SmokeTest -and $studyReady -eq "1") {
+        Write-Step "Starting audited after-market study supervisor..."
+        $studyProcess = Start-Process -FilePath $VenvPython `
+            -ArgumentList @("-u", "scripts\tradebrain_after_market_study.py", "--loop") `
+            -WorkingDirectory $RootDir `
+            -RedirectStandardOutput $StudyOut `
+            -RedirectStandardError $StudyErr `
+            -PassThru
+    } elseif ($NoStudy) {
+        Write-Step "After-market study supervisor disabled by -NoStudy."
+    } elseif (-not $SmokeTest -and $studyReady -ne "1") {
+        Write-Step "After-market study supervisor waiting for local Kite API key/access token configuration."
+    }
+
     $env:NEXT_PUBLIC_API_URL = "http://localhost:$BackendPort"
 
     Write-Step "Starting frontend on port $FrontendPort..."
@@ -280,6 +297,24 @@ try {
         }
     }
 
+    if ($studyProcess) {
+        Start-Sleep -Milliseconds 500
+        if ($studyProcess.HasExited) {
+            $studyText = ""
+            if (Test-Path $StudyOut) { $studyText = (Get-Content $StudyOut -Raw -ErrorAction SilentlyContinue) }
+            if ($studyText -match "SUPERVISOR_ALREADY_RUNNING") {
+                Write-Ok "After-market study supervisor was already running; duplicate was not started."
+            } else {
+                Write-Warn "After-market study supervisor exited; Trade Brain remains available."
+                Show-LogTail -Path $StudyOut -Label "Study output"
+                Show-LogTail -Path $StudyErr -Label "Study errors"
+            }
+            $studyProcess = $null
+        } else {
+            Write-Ok "After-market study supervisor running (exchange-aware, once per IST date)."
+        }
+    }
+
     if ($SmokeTest) {
         Write-Ok "Windows end-to-end smoke passed: backend + frontend became healthy."
         exit 0
@@ -298,8 +333,9 @@ try {
     Write-Host "  Frontend output: $FrontendOut"
     Write-Host "  Frontend errors: $FrontendErr"
     if ($kiteProcess) { Write-Host "  Kite live output:$KiteOut" }
+    if ($studyProcess) { Write-Host "  Study output:    $StudyOut" }
     Write-Host ""
-    Write-Step "Keep this window open. Press Ctrl+C to stop Trade Brain."
+    Write-Step "Keep this window open. Press Ctrl+C to stop Trade Brain and its supervised processes."
 
     while ($true) {
         Start-Sleep -Seconds 2
@@ -316,9 +352,16 @@ try {
             Show-LogTail -Path $KiteErr -Label "Kite errors"
             $kiteProcess = $null
         }
+        if ($studyProcess -and $studyProcess.HasExited) {
+            Write-Warn "After-market study supervisor stopped; live/advisory Trade Brain remains available."
+            Show-LogTail -Path $StudyOut -Label "Study output"
+            Show-LogTail -Path $StudyErr -Label "Study errors"
+            $studyProcess = $null
+        }
     }
 } finally {
     Write-Step "Stopping Trade Brain processes..."
+    Stop-ProcessTree -Process $studyProcess
     Stop-ProcessTree -Process $kiteProcess
     Stop-ProcessTree -Process $frontendProcess
     Stop-ProcessTree -Process $backendProcess
