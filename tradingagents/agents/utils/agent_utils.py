@@ -35,27 +35,34 @@ def get_language_instruction() -> str:
 
 
 def build_instrument_context(ticker: str) -> str:
-    """Describe the exact instrument so agents preserve exchange-qualified tickers."""
+    """Return the fixed BSE Ltd research scope shared by all LLM agents.
+
+    The Trade Brain branch is single-instrument. The graph still carries the yfinance-style
+    alias ``BSE.NS`` internally for compatible data tools, while Kite and the product UI use
+    the canonical market-data identity ``NSE:BSE``.
+    """
+    normalized = str(ticker or "").strip().upper()
     return (
-        f"The instrument to analyze is `{ticker}`. "
-        "Use this exact ticker in every tool call, report, and recommendation, "
-        "preserving any exchange suffix (e.g. `.TO`, `.L`, `.HK`, `.T`)."
+        "TRADE BRAIN PRODUCT SCOPE: The only tradable company in this application is "
+        "BSE Ltd (Bombay Stock Exchange Ltd), NSE-listed symbol `BSE`, canonical Kite "
+        "identity `NSE:BSE`, yfinance-compatible alias `BSE.NS`, ISIN `INE118H01025`. "
+        f"The graph supplied instrument alias is `{normalized}`. "
+        "Use that supplied alias for company-specific tool calls when the tool expects a "
+        "Yahoo-style ticker. Never turn NIFTY, BANK NIFTY, SENSEX, India VIX, sectors, "
+        "FII/DII, global indices or another stock into a trade recommendation; those are "
+        "context inputs only for judging BSE Ltd. The only active trade modes are "
+        "INTRADAY and SWING."
     )
+
 
 def create_msg_delete():
     def delete_messages(state):
-        """Clear messages and add placeholder for Anthropic compatibility"""
+        """Clear messages and add placeholder for provider compatibility."""
         messages = state["messages"]
 
-        # Remove all messages
         removal_operations = [RemoveMessage(id=m.id) for m in messages]
-
-        # Add a minimal placeholder message
         placeholder = HumanMessage(content="Continue")
 
         return {"messages": removal_operations + [placeholder]}
 
     return delete_messages
-
-
-        
