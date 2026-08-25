@@ -18,6 +18,14 @@ class TradeBrainLLMFailoverTests(unittest.TestCase):
         error = RuntimeError("429 RESOURCE_EXHAUSTED quota exceeded for generate_content_free_tier_requests")
         self.assertTrue(is_retryable_llm_capacity_error(error))
 
+    def test_groq_ratelimiterror_is_retryable(self):
+        error = RuntimeError("RateLimitError: server overloaded, please retry")
+        self.assertTrue(is_retryable_llm_capacity_error(error))
+
+    def test_transient_gateway_errors_are_retryable(self):
+        self.assertTrue(is_retryable_llm_capacity_error(RuntimeError("502 bad gateway capacity issue")))
+        self.assertTrue(is_retryable_llm_capacity_error(RuntimeError("504 gateway timeout")))
+
     def test_programming_error_is_not_retryable(self):
         self.assertFalse(is_retryable_llm_capacity_error(RuntimeError("KeyError: ticker")))
 
@@ -39,16 +47,33 @@ class TradeBrainLLMFailoverTests(unittest.TestCase):
         self.assertTrue(fallback["advisory_only"])
         self.assertFalse(fallback["order_execution_enabled"])
 
+    def test_groq_uses_google_when_local_key_exists(self):
+        config = {
+            "llm_provider": "groq",
+            "deep_think_llm": "openai/gpt-oss-20b",
+            "quick_think_llm": "openai/gpt-oss-20b",
+            "advisory_only": True,
+        }
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "test_not_real"}, clear=False):
+            fallback = get_capacity_fallback_config(config)
+        self.assertIsNotNone(fallback)
+        assert fallback is not None
+        self.assertEqual(fallback["llm_provider"], "google")
+        self.assertEqual(fallback["deep_think_llm"], "gemini-3.6-flash")
+        self.assertTrue(fallback["advisory_only"])
+
     def test_no_key_means_no_automatic_fallback(self):
         config = {"llm_provider": "google"}
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("GROQ_API_KEY", None)
             self.assertIsNone(get_capacity_fallback_config(config))
 
-    def test_public_error_does_not_dump_provider_payload(self):
+    def test_public_error_does_not_dump_provider_payload_and_fails_closed(self):
         error = RuntimeError("429 RESOURCE_EXHAUSTED huge provider payload secret-like-noise")
         message = public_capacity_error(error, fallback_available=False)
+        self.assertIn("AI_UNAVAILABLE / WAIT", message)
         self.assertIn("quota/rate limit", message)
+        self.assertIn("WAIT / NO TRADE", message)
         self.assertNotIn("huge provider payload", message)
         self.assertIn("Settings > Models & Keys", message)
 
