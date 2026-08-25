@@ -23,6 +23,7 @@ from backend.tradebrain.llm_failover import (
     is_retryable_llm_capacity_error,
     public_capacity_error,
 )
+from backend.tradebrain.llm_verifier import verify_material_finding
 from pydantic import BaseModel as PydanticBaseModel
 from tradingagents.utils.ticker import normalize_ticker
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -80,8 +81,10 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
     from tradingagents.graph.propagation import Propagator
     from backend.stats_callback import StatsCallback
 
+    # BSE default team avoids a redundant generic social analyst. Price/structure,
+    # BSE/market news context and fundamentals are the default research inputs.
     if selected_analysts is None:
-        selected_analysts = ["market", "social", "news", "fundamentals"]
+        selected_analysts = ["market", "news", "fundamentals"]
 
     loop = asyncio.new_event_loop()
     start_time = time.time()
@@ -193,8 +196,8 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
                 ) from primary_error
 
             failover_used = True
-            primary_provider = str(active_config.get("llm_provider") or "google")
-            fallback_provider = str(fallback_config.get("llm_provider") or "groq")
+            primary_provider = str(active_config.get("llm_provider") or "unknown")
+            fallback_provider = str(fallback_config.get("llm_provider") or "alternate")
             message = (
                 f"{primary_provider.title()} quota/rate limit reached — automatically "
                 f"switching this analysis to {fallback_provider.title()}..."
@@ -218,17 +221,40 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
                         public_capacity_error(fallback_error, fallback_available=True)
                     ) from fallback_error
                 raise RuntimeError(
-                    f"Automatic Groq fallback could not complete the analysis: {str(fallback_error)[:500]}"
+                    f"Automatic alternate-provider attempt could not complete the analysis: {str(fallback_error)[:500]}"
                 ) from fallback_error
 
         final_text = final_state.get("final_trade_decision", "")
         research_label = ta.process_signal(final_text)
+        active_provider = str(active_config.get("llm_provider") or "unknown").lower()
+
+        # Groq is the normal BSE research provider. Only material findings are sent to
+        # Gemini for an independent claim/evidence check; verifier failure never grants
+        # authority or overrides the deterministic Trade Brain gate.
+        material_verifier = verify_material_finding(
+            research_label=research_label,
+            final_trade_decision=final_text,
+            market_report=final_state.get("market_report"),
+            news_report=final_state.get("news_report"),
+            fundamentals_report=final_state.get("fundamentals_report"),
+            config=active_config,
+        )
+
         exchange = str(active_config.get("default_exchange") or "NSE").upper()
         tradebrain_advisory = _analysis_advisory(ticker, trade_date, exchange, final_text)
 
         duration = time.time() - start_time
         stats_summary = stats.summary()
-        active_provider = str(active_config.get("llm_provider") or "unknown").lower()
+        # stats is persisted as JSON by the legacy analysis store, so verification remains
+        # available even though the old table has no dedicated verifier column yet.
+        stats_summary["material_verifier"] = material_verifier
+
+        if material_verifier.get("status") not in {"SKIPPED_NOT_MATERIAL", "UNAVAILABLE_NOT_CONFIGURED"}:
+            loop.run_until_complete(manager.send_event(task_id, {
+                "type": "verification",
+                "verification": material_verifier,
+                "trade_authorization": False,
+            }))
 
         # Keep the legacy event type for frontend compatibility, but the value is now a
         # non-authorizing research label and the explicit safety metadata travels with it.
@@ -242,6 +268,7 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
             "tradebrain_advisory": tradebrain_advisory,
             "llm_provider": active_provider,
             "llm_failover_used": failover_used,
+            "material_verifier": material_verifier,
         }))
         loop.run_until_complete(manager.send_event(task_id, {
             "type": "stats", **stats_summary,
@@ -253,6 +280,7 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
             "trade_authorization": False,
             "llm_provider": active_provider,
             "llm_failover_used": failover_used,
+            "material_verifier": material_verifier,
         }))
 
         invest_state = final_state.get("investment_debate_state", {})
@@ -269,6 +297,7 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
             "tradebrain_advisory": tradebrain_advisory,
             "llm_provider": active_provider,
             "llm_failover_used": failover_used,
+            "material_verifier": material_verifier,
             "market_report": final_state.get("market_report"),
             "sentiment_report": final_state.get("sentiment_report"),
             "news_report": final_state.get("news_report"),
@@ -367,6 +396,8 @@ def get_analysis_result(task_id: str):
         result["order_execution_allowed"] = False
         result["requires_tradebrain_gate"] = True
         result["tradebrain_advisory"] = persisted.get("advisory") if persisted else None
+        if isinstance(result.get("stats"), dict):
+            result["material_verifier"] = result["stats"].get("material_verifier")
         return result
     return {"error": "Analysis not found"}
 
