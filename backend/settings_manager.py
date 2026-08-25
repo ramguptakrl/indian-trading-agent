@@ -29,7 +29,7 @@ PROVIDERS_INFO = {
         "name": "Google Gemini",
         "key_format": "AIza...",
         "signup_url": "https://aistudio.google.com/app/apikey",
-        "note": "Trade Brain default provider. Keys are saved locally and masked in the UI.",
+        "note": "Trade Brain material-finding verifier/challenger and retryable-capacity fallback when Groq is primary. Keys are saved locally and masked in the UI.",
         "models_deep": [
             "gemini-3.1-pro-preview",
             "gemini-3.6-flash",
@@ -47,7 +47,7 @@ PROVIDERS_INFO = {
         "name": "Groq",
         "key_format": "gsk_...",
         "signup_url": "https://console.groq.com/keys",
-        "note": "OpenAI-compatible Groq inference. Useful as a fast alternate provider.",
+        "note": "Trade Brain primary research/synthesis provider using OpenAI-compatible Groq inference.",
         "models_deep": ["openai/gpt-oss-20b"],
         "models_quick": ["openai/gpt-oss-20b"],
     },
