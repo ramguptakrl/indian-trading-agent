@@ -28,7 +28,7 @@ INDEX_KEY = "NSE:NIFTY_50"
 EXCHANGE = "NSE"
 SYMBOL = "NIFTY 50"
 INTERVAL = "1d"
-METHOD_VERSION = "AUDITED_NIFTY50_CONTEXT_V1"
+METHOD_VERSION = "AUDITED_NIFTY50_CONTEXT_V2_SEVERITY_ORDERED"
 
 
 @contextmanager
@@ -346,12 +346,15 @@ def nifty50_correction_context(
     baseline = sum(baselines) / len(baselines) if baselines else vol20
     drawdown20 = (close / max(closes[-20:]) - 1.0) * 100.0
 
-    if close < sma20 < sma50 and baseline > 0 and vol20 > baseline * 1.5:
-        state = "HIGH_VOL_TREND_DOWN"
-        reason = "NIFTY 50 close < SMA20 < SMA50 with elevated 20-session realized volatility"
-    elif close < sma20 < sma50 and drawdown20 <= -8.0:
+    # Severity ordering matters: a downtrend with an >=8% recent drawdown is classified
+    # SEVERE even if realized volatility is also elevated. This keeps the state label
+    # consistent with Guardian's correction-risk ordering.
+    if close < sma20 < sma50 and drawdown20 <= -8.0:
         state = "SEVERE_CORRECTION"
         reason = "NIFTY 50 downtrend with at least 8% drawdown from its recent 20-session high"
+    elif close < sma20 < sma50 and baseline > 0 and vol20 > baseline * 1.5:
+        state = "HIGH_VOL_TREND_DOWN"
+        reason = "NIFTY 50 close < SMA20 < SMA50 with elevated 20-session realized volatility"
     elif close < sma20 < sma50:
         state = "TREND_DOWN"
         reason = "NIFTY 50 close < SMA20 < SMA50"
