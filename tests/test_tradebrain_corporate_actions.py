@@ -1,4 +1,5 @@
 from backend.tradebrain.corporate_actions import corporate_action_context, normalize_corporate_action
+from backend.tradebrain.multi_timeframe import _gap_snapshot
 
 
 def test_dividend_keeps_explicit_dates_and_amount_only():
@@ -86,3 +87,47 @@ def test_record_date_without_ex_date_does_not_block_gap_by_guess():
     assert context["mechanical_gap_risk"] is False
     assert context["raw_overnight_gap_comparable"] is True
     assert context["unknown_ex_date_is_not_guessed"] is True
+
+
+def test_historical_context_excludes_event_not_yet_known():
+    events = [{
+        "event_id": "future-known",
+        "category": "DIVIDEND",
+        "subject": "Dividend of INR 8 per share",
+        "details": "Ex-date: 17-09-2026",
+        "fetched_at": "2026-09-10T10:00:00+00:00",
+    }]
+    before = corporate_action_context(
+        events,
+        session_date="2026-09-17",
+        known_by="2026-09-01T10:00:00+00:00",
+    )
+    after = corporate_action_context(
+        events,
+        session_date="2026-09-17",
+        known_by="2026-09-16T10:00:00+00:00",
+    )
+    assert before["known_ex_date_event"] is False
+    assert before["future_knowledge_excluded"] == 1
+    assert after["known_ex_date_event"] is True
+
+
+def test_gap_snapshot_preserves_raw_move_but_disables_normal_gap_signal_on_ex_date():
+    daily = [
+        {"close": 100.0, "open": 99.0, "ts_open": "2026-09-16T09:15:00+05:30"},
+        {"close": 93.0, "open": 92.0, "ts_open": "2026-09-17T09:15:00+05:30"},
+    ]
+    gap = _gap_snapshot(
+        daily,
+        corporate_action={
+            "mechanical_gap_risk": True,
+            "dividend_ex_date": True,
+            "stock_split_ex_date": False,
+            "ex_date_actions": [{"action_type": "DIVIDEND"}],
+        },
+    )
+    assert gap["status"] == "CORPORATE_ACTION_AFFECTED"
+    assert gap["direction"] == "CORPORATE_ACTION_AFFECTED_OPEN"
+    assert gap["raw_direction"] == "GAP_DOWN"
+    assert gap["gap_pct"] == -8.0
+    assert gap["eligible_as_normal_gap_signal"] is False
