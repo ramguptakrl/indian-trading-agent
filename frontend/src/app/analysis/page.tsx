@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useAnalysisStore } from "@/lib/store";
+import {
+  useHorizonAnalysisStore,
+  type HorizonPlanState,
+} from "@/lib/horizon-analysis-store";
 import { getIndiaMarketDate } from "@/lib/market-time";
 import { DecisionCard } from "@/components/analysis/DecisionCard";
 import { AgentProgress } from "@/components/analysis/AgentProgress";
@@ -21,8 +24,105 @@ import { PositionSizeCalculator } from "@/components/PositionSizeCalculator";
 
 const BSE_TICKER = "BSE";
 
+function HorizonSummary({
+  plan,
+  title,
+  description,
+}: {
+  plan: HorizonPlanState;
+  title: string;
+  description: string;
+}) {
+  return (
+    <Card className="h-full">
+      <CardContent className="p-5 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold">{title}</h2>
+              <Badge variant="outline">{plan.mode}</Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">{description}</p>
+          </div>
+          <Badge variant={plan.status === "error" ? "destructive" : "secondary"}>
+            {plan.status.toUpperCase()}
+          </Badge>
+        </div>
+
+        {plan.taskId && (
+          <p className="text-[10px] text-muted-foreground font-mono">Task: {plan.taskId}</p>
+        )}
+
+        {plan.error && (
+          <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-700">
+            {plan.error}
+          </div>
+        )}
+
+        {plan.status === "running" && plan.heartbeat && (
+          <div className="rounded-md border border-blue-200 bg-blue-50/50 p-3">
+            <div className="flex items-center gap-2 text-sm">
+              <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+              <span className="text-blue-700 font-mono text-xs truncate flex-1">{plan.heartbeat}</span>
+            </div>
+          </div>
+        )}
+
+        {plan.signal ? (
+          <DecisionCard
+            signal={plan.signal}
+            ticker={BSE_TICKER}
+            duration={plan.duration}
+            advisory={plan.tradebrainAdvisory}
+          />
+        ) : plan.status === "completed" ? (
+          <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+            This horizon completed without a trade candidate. Treat it as WAIT / NO TRADE.
+          </div>
+        ) : null}
+
+        {plan.stats && plan.status === "completed" && (
+          <StatsCard stats={plan.stats} duration={plan.duration} />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function HorizonResearchTrail({ plan, title }: { plan: HorizonPlanState; title: string }) {
+  if (plan.status === "idle") return null;
+
+  return (
+    <Card>
+      <CardContent className="p-5 space-y-5">
+        <div>
+          <h3 className="font-semibold">{title} research trail</h3>
+          <p className="text-xs text-muted-foreground">
+            Independent agent evidence and debate for this horizon only.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <div className="lg:col-span-1">
+            <AgentProgress reports={plan.reports} signal={plan.signal} status={plan.status} />
+          </div>
+          <div className="lg:col-span-3 space-y-4">
+            <ReportPanel reports={plan.reports} />
+            <DebateView
+              bull={plan.debates.bull}
+              bear={plan.debates.bear}
+              riskAggressive={plan.riskDebates.aggressive}
+              riskConservative={plan.riskDebates.conservative}
+              riskNeutral={plan.riskDebates.neutral}
+            />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AnalysisPage() {
-  const analysis = useAnalysisStore();
+  const analysis = useHorizonAnalysisStore();
   const [tradeDateInput, setTradeDateInput] = useState(analysis.tradeDate || "");
   const [indiaToday, setIndiaToday] = useState("");
   const [selectedAnalysts, setSelectedAnalysts] = useState<string[]>([
@@ -46,13 +146,18 @@ export default function AnalysisPage() {
 
   const handleRun = () => {
     if (!tradeDateInput) return;
-    analysis.start(BSE_TICKER, tradeDateInput, {
+    analysis.start(tradeDateInput, {
       analysts: selectedAnalysts,
       max_debate_rounds: depth,
       max_risk_discuss_rounds: depth,
       output_language: language,
     });
   };
+
+  const intraday = analysis.plans.INTRADAY;
+  const swing = analysis.plans.SWING;
+  const running = analysis.status === "running";
+  const hasRun = analysis.status !== "idle";
 
   return (
     <div className="p-6 space-y-6">
@@ -63,8 +168,7 @@ export default function AnalysisPage() {
             <Badge variant="outline">NSE:BSE</Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            BSE-specific multi-agent research feeding the deterministic Trade Brain advisory gate.
-            Broader market inputs are context only.
+            Two independent BSE analyses run together: INTRADAY and SWING · MTF. Neither horizon may substitute for the other.
           </p>
         </div>
         <div className="flex gap-2">
@@ -72,7 +176,7 @@ export default function AnalysisPage() {
             <Calculator className="h-3 w-3 mr-2" />
             Position Calc
           </Button>
-          {analysis.status !== "idle" && (
+          {hasRun && (
             <Button variant="outline" size="sm" onClick={analysis.reset}>
               <RotateCcw className="h-3 w-3 mr-2" />
               New Analysis
@@ -83,19 +187,19 @@ export default function AnalysisPage() {
 
       <Card>
         <CardContent className="p-4">
-          <div className="flex gap-4 items-end">
+          <div className="flex flex-col lg:flex-row gap-4 lg:items-end">
             <div className="flex-1 rounded-lg border bg-muted/20 px-4 py-3">
               <div className="flex items-center gap-3">
                 <Building2 className="h-5 w-5 text-green-600" />
                 <div>
                   <p className="text-xs text-muted-foreground">Fixed Trade Brain instrument</p>
                   <p className="font-semibold">BSE Ltd · NSE:BSE</p>
-                  <p className="text-[11px] text-muted-foreground">ISIN INE118H01025 · only tradable target on this branch</p>
+                  <p className="text-[11px] text-muted-foreground">ISIN INE118H01025 · only tradable target</p>
                 </div>
               </div>
             </div>
 
-            <div className="w-56">
+            <div className="w-full lg:w-56">
               <label className="text-xs text-muted-foreground mb-1 block">
                 Analysis Date <span className="font-semibold text-foreground">(India / IST)</span>
               </label>
@@ -104,35 +208,40 @@ export default function AnalysisPage() {
                 value={tradeDateInput}
                 max={indiaToday || undefined}
                 onChange={(e) => setTradeDateInput(e.target.value)}
-                disabled={analysis.status === "running"}
+                disabled={running}
               />
               {indiaToday && (
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  India market date: {indiaToday}
-                </p>
+                <p className="mt-1 text-[10px] text-muted-foreground">India market date: {indiaToday}</p>
               )}
             </div>
 
-            <Button
-              onClick={handleRun}
-              disabled={analysis.status === "running" || !tradeDateInput}
-              className="h-10"
-            >
-              {analysis.status === "running" ? (
+            <Button onClick={handleRun} disabled={running || !tradeDateInput} className="h-10">
+              {running ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Analyzing BSE...
+                  Analyzing both horizons...
                 </>
               ) : (
                 <>
                   <Play className="h-4 w-4 mr-2" />
-                  Analyze BSE
+                  Analyze INTRADAY + SWING
                 </>
               )}
             </Button>
           </div>
         </CardContent>
       </Card>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="rounded-lg border px-4 py-3">
+          <p className="font-semibold text-sm">INTRADAY</p>
+          <p className="text-xs text-muted-foreground">Independent LONG or SHORT setup · same session · flat before 15:15 IST.</p>
+        </div>
+        <div className="rounded-lg border px-4 py-3">
+          <p className="font-semibold text-sm">SWING · ZERODHA MTF</p>
+          <p className="text-xs text-muted-foreground">Independent LONG-only multi-day setup · MTF eligibility/funding/costs must be verified.</p>
+        </div>
+      </div>
 
       <AnalysisOptions
         analysts={selectedAnalysts}
@@ -141,7 +250,7 @@ export default function AnalysisPage() {
         onDepthChange={setDepth}
         language={language}
         onLanguageChange={setLanguage}
-        disabled={analysis.status === "running"}
+        disabled={running}
       />
 
       {analysis.error && (
@@ -150,58 +259,28 @@ export default function AnalysisPage() {
         </Card>
       )}
 
-      {analysis.status === "running" && analysis.heartbeat && (
-        <Card className="border-blue-200 bg-blue-50/50">
-          <CardContent className="p-3">
-            <div className="flex items-center gap-2 text-sm">
-              <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
-              <span className="text-xs text-muted-foreground">Live:</span>
-              <span className="text-blue-700 font-mono text-xs truncate flex-1">{analysis.heartbeat}</span>
-              {analysis.lastUpdateAt > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  {Math.floor((Date.now() - analysis.lastUpdateAt) / 1000)}s ago
-                </span>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {analysis.signal && (
-        <DecisionCard
-          signal={analysis.signal}
-          ticker={BSE_TICKER}
-          duration={analysis.duration}
-          advisory={analysis.tradebrainAdvisory}
-        />
-      )}
-
-      {analysis.stats && analysis.status === "completed" && (
-        <StatsCard stats={analysis.stats} duration={analysis.duration} />
-      )}
-
-      {(analysis.status === "running" || analysis.status === "completed") && (
-        <div className="grid grid-cols-4 gap-6">
-          <div className="col-span-1">
-            <AgentProgress reports={analysis.reports} signal={analysis.signal} status={analysis.status} />
-          </div>
-          <div className="col-span-3 space-y-4">
-            <ReportPanel reports={analysis.reports} />
-            <DebateView
-              bull={analysis.debates.bull}
-              bear={analysis.debates.bear}
-              riskAggressive={analysis.riskDebates.aggressive}
-              riskConservative={analysis.riskDebates.conservative}
-              riskNeutral={analysis.riskDebates.neutral}
-            />
-          </div>
+      {hasRun && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <HorizonSummary
+            plan={intraday}
+            title="INTRADAY plan"
+            description="Same-session LONG/SHORT decision. Weak evidence becomes WAIT / NO TRADE, never a SWING substitute."
+          />
+          <HorizonSummary
+            plan={swing}
+            title="SWING · MTF plan"
+            description="Multi-day LONG-only decision. Weak evidence becomes WAIT / NO TRADE, never an INTRADAY substitute."
+          />
         </div>
       )}
 
-      {analysis.status === "completed" && analysis.signal && (
+      <HorizonResearchTrail plan={intraday} title="INTRADAY" />
+      <HorizonResearchTrail plan={swing} title="SWING · MTF" />
+
+      {analysis.status === "completed" && (intraday.signal || swing.signal) && (
         <NextStep
-          title="Review BSE evidence or log an outcome"
-          description="This result is advisory research, not an order. If you independently act on it, record the real fill in Actual Trades after executing externally."
+          title="Review BSE evidence or log what you actually did"
+          description="Both plans are advisory research, not broker orders. If you independently act, record the real fill in Actual Trades."
           href="/history"
           buttonText="BSE Analysis Outcomes"
           icon={History}
