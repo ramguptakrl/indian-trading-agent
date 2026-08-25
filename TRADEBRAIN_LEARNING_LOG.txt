@@ -81,3 +81,29 @@ Interpretation:
 - "Training" in Trade Brain is now explicitly defined as accumulating falsifiable market
   evidence, replay outcomes, and prospective observations. It does not fine-tune the LLM
   or grant the model authority to rewrite protected trading policy.
+
+2026-08-25 — Deep Analysis provider wiring correction
+------------------------------------------------------
+STATUS: PASSED
+
+Evidence:
+- A live localhost Deep Analysis request reached the backend but surfaced an Anthropic
+  authentication failure because the repository default provider was still Anthropic.
+- Trade Brain's default LLM provider was changed to Google Gemini.
+- Default quick model is gemini-3.6-flash; default deep model is
+  gemini-3.1-pro-preview.
+- Groq was added as a first-class OpenAI-compatible provider using the local
+  GROQ_API_KEY credential and openai/gpt-oss-20b model option.
+- Settings > Models & Keys remains the local credential handoff point. Key status is
+  masked; raw API keys are not returned by the status API.
+- Missing cloud-provider credentials now fail with Trade Brain Settings guidance instead
+  of exposing a raw provider-SDK authentication error.
+- Foundation CI run 32871551701 passed the frontend build, all Trade Brain tests, and
+  Phase 2 through Phase 10 observational smokes.
+
+Interpretation:
+- The observed frontend-to-backend Deep Analysis path was connected; the failure was stale
+  provider selection/auth configuration rather than Kite or browser connectivity.
+- Gemini is now the default intelligence provider and Groq is available as an alternate.
+- Provider credentials remain local and do not alter Trade Brain's advisory-only or
+  Kite MARKET_DATA_ONLY safety boundaries.
