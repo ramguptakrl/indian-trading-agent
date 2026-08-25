@@ -63,13 +63,16 @@ class OfficialCorporateActionEraTests(unittest.TestCase):
         }
 
     def _seed_daily_bars(self):
-        # UTC 03:45 is regular 09:15 IST open.
         from backend.tradebrain.market_data_store import upsert_bars
 
+        session_opens = [
+            datetime(2026, 8, 20, 3, 45, tzinfo=timezone.utc),  # Thu
+            datetime(2026, 8, 21, 3, 45, tzinfo=timezone.utc),  # Fri
+            datetime(2026, 8, 24, 3, 45, tzinfo=timezone.utc),  # Mon split ex-date
+            datetime(2026, 8, 25, 3, 45, tzinfo=timezone.utc),  # Tue
+        ]
         bars = []
-        start = datetime(2026, 8, 20, 3, 45, tzinfo=timezone.utc)
-        for offset, close in enumerate((100.0, 102.0, 52.0, 53.0)):
-            opened = start + timedelta(days=offset)
+        for opened, close in zip(session_opens, (100.0, 102.0, 52.0, 53.0)):
             bars.append({
                 "ts_open": opened.isoformat(),
                 "ts_close": (opened + timedelta(hours=6, minutes=15)).isoformat(),
@@ -93,14 +96,14 @@ class OfficialCorporateActionEraTests(unittest.TestCase):
             self._event(
                 "split-1",
                 category="CORPORATE_ACTION",
-                details="Stock split: face value of Rs 2 into face value of Rs 1. Ex-date 22-Aug-2026. Record date 24-Aug-2026.",
+                details="Stock split: face value of Rs 2 into face value of Rs 1. Ex-date 24-Aug-2026. Record date 25-Aug-2026.",
                 announced="2026-08-18T06:00:00+00:00",
             )
         ], db_path=self.db)
 
         result = sync_official_bse_split_price_eras(
             self.series["series_id"],
-            known_by="2026-08-25T00:00:00+00:00",
+            known_by="2026-08-25T12:00:00+00:00",
             db_path=self.db,
         )
         self.assertEqual(result["status"], "OFFICIAL_SPLIT_ERAS_SYNCHRONIZED")
@@ -109,15 +112,15 @@ class OfficialCorporateActionEraTests(unittest.TestCase):
         self.assertFalse(result["dividends_create_price_era"])
 
         bars = query_bars(self.series["series_id"], "1d", limit=100, db_path=self.db)
-        before = {bar["era_id"] for bar in bars if bar["ts_open"] < "2026-08-22T03:45:00+00:00"}
-        after = {bar["era_id"] for bar in bars if bar["ts_open"] >= "2026-08-22T03:45:00+00:00"}
+        boundary = "2026-08-24T03:45:00+00:00"
+        before = {bar["era_id"] for bar in bars if bar["ts_open"] < boundary}
+        after = {bar["era_id"] for bar in bars if bar["ts_open"] >= boundary}
         self.assertEqual(len(before), 1)
         self.assertEqual(len(after), 1)
         self.assertNotEqual(before, after)
 
-        # Rebuilding is idempotent at the logical boundary level.
         again = sync_official_bse_split_price_eras(
-            self.series["series_id"], known_by="2026-08-25T00:00:00+00:00", db_path=self.db
+            self.series["series_id"], known_by="2026-08-25T12:00:00+00:00", db_path=self.db
         )
         self.assertEqual(again["split_boundaries"], 1)
         bars_again = query_bars(self.series["series_id"], "1d", limit=100, db_path=self.db)
@@ -129,12 +132,12 @@ class OfficialCorporateActionEraTests(unittest.TestCase):
             self._event(
                 "div-1",
                 category="DIVIDEND",
-                details="Dividend of Rs 5 per equity share. Ex-date 22-Aug-2026. Record date 24-Aug-2026.",
+                details="Dividend of Rs 5 per equity share. Ex-date 24-Aug-2026. Record date 25-Aug-2026.",
                 announced="2026-08-18T06:00:00+00:00",
             )
         ], db_path=self.db)
         result = sync_official_bse_split_price_eras(
-            self.series["series_id"], known_by="2026-08-25T00:00:00+00:00", db_path=self.db
+            self.series["series_id"], known_by="2026-08-25T12:00:00+00:00", db_path=self.db
         )
         self.assertEqual(result["status"], "NO_KNOWN_OFFICIAL_SPLIT_BOUNDARY")
         self.assertEqual(result["split_boundaries"], 0)
@@ -146,7 +149,7 @@ class OfficialCorporateActionEraTests(unittest.TestCase):
             self._event(
                 "split-future",
                 category="CORPORATE_ACTION",
-                details="Stock split: face value of Rs 2 into face value of Rs 1. Ex-date 22-Aug-2026.",
+                details="Stock split: face value of Rs 2 into face value of Rs 1. Ex-date 24-Aug-2026.",
                 announced="2026-08-23T06:00:00+00:00",
             )
         ], db_path=self.db)
