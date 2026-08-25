@@ -1,43 +1,39 @@
-# Indian Trading Agent Trial / Trade Brain — Current Project State
+# Trade Brain — BSE Ltd Project State
 
 Status date: **2026-08-25**  
 Repository: `ramguptakrl/indian-trading-agent`  
 Development branch: `tradebrain/reframe-foundation`  
 Protected checkpoint: `checkpoint/tradebrain-bse-framework-2026-08-25`  
 Checkpoint SHA: `5d8ff95c013a9091f576591dbbe9bae4439c099e`  
-PR #1: OPEN / DRAFT / intentionally UNMERGED  
+PR #1: **OPEN / DRAFT / intentionally UNMERGED**  
 Current product version: **Trade Brain v0.13.0**
+
+## Runtime-ready checkpoint
+
+Validated runtime commit:
+
+`1b4866b9fc9f86100dd41f3d0aa8673c4241c5ca`
+
+That exact runtime head passed:
+
+- Trade Brain Foundation ✅
+- Trade Brain Windows ✅
+- Trade Brain Security ✅
+- Trade Brain Dependency Refresh ✅
+- 201 Trade Brain unit/regression tests ✅
+- production Next.js frontend build ✅
+- Windows PowerShell/BAT launcher validation ✅
+- Windows clean first-run backend/frontend end-to-end health smoke ✅
+
+A later validation-only commit, `caef3773a79575e385d91d2c01fd87cc82c0a5e5`, upgrades the Phase-6 smoke so it explicitly validates both INTRADAY resident-equity economics and active SWING Zerodha-MTF economics. It does not enable broker execution or change live trading policy.
 
 ## Project identity
 
-This is the Indian Trading Agent Trial → BSE-focused Trade Brain project.
-Kronos-BSE is separate and must not be mixed into this repository.
+This repository branch is **our Trade Brain / BSE software**, not the generic inherited ITA product.
 
-## Current product doctrine
+Kronos-BSE is a separate project and must not be mixed into this branch unless explicitly requested.
 
-Trade Brain is an audited BSE Ltd (`NSE:BSE`) research/advisory system for a modeled
-`RESIDENT_INDIAN` trader.
-
-Active modes:
-
-- `INTRADAY`: LONG or SHORT cash equity; same session; no fresh entry from 15:10 IST;
-  intended flat by 15:15 IST.
-- `SWING`: LONG-only, multi-day, **Zerodha MTF-funded**.
-
-Important funding rule:
-
-```text
-SWING != a third "MTF mode"
-SWING funding = MTF only
-CNC_OWN_CASH = historical-readable compatibility label, not active SWING permission
-```
-
-Active SWING requires current MTF eligibility verification and a positive funded amount.
-Net SWING scenarios combine resident equity transaction costs with the versioned Zerodha
-MTF funding profile. An MTF holding/interest-days scenario must be explicit before a
-fully costed SWING candidate can PASS; Trade Brain does not invent the holding duration.
-
-Broker execution remains OFF:
+Trade Brain is an audited BSE Ltd (`NSE:BSE`, ISIN `INE118H01025`) research/advisory system for a modeled `RESIDENT_INDIAN` trader.
 
 ```text
 advisory_only = true
@@ -45,86 +41,189 @@ trade_authorization = false
 order_execution_allowed = false
 ```
 
-## AI / model framework
+## Active horizons
 
-- Groq is the primary configured research/synthesis path.
-- Gemini is the material-finding verifier/challenger when configured.
-- Provider failover handles retryable quota/capacity errors.
-- LLM output is evidence/candidate generation only.
-- Deterministic calendar, market/risk, broker and funding rules outrank AI.
+### INTRADAY
 
-## Evidence / learning framework
+- LONG or SHORT cash-equity research
+- same-session only
+- no fresh entry from 15:10 IST
+- flat before 15:15 IST
+- resident equity transaction costs included
 
-Implemented foundation includes:
+### SWING
 
-- BSE-only trade-target boundary;
-- official identity/provenance and corporate-event memory;
-- audited RAW_UNADJUSTED OHLCV;
-- look-ahead-safe replay and strict outcomes;
-- multi-timeframe / gap / structure / pattern research;
-- Focus Instrument Lab;
-- frozen challenger and walk-forward governance;
-- human-approved soft parameter runtime;
-- verified exchange-calendar/session controls;
-- Crash Guard and abnormal-market guards;
-- read-only Kite historical/REST/WebSocket market-data plane;
-- final fail-closed advisory pipeline;
-- actual manual trade journal;
-- Windows launcher and browser UI.
+- LONG only
+- active funding path: **Zerodha MTF only**
+- current MTF eligibility must be verified
+- funded amount must be explicit
+- positive interest-day scenario is required for fully costed advice/replay
+- `CNC_OWN_CASH` remains historical-readable compatibility only, not active SWING permission
 
-Hard rules cannot self-learn.
+No F&O is enabled.
 
-## MTF economics
+## Decision architecture complete
 
-The repository contains a versioned Zerodha MTF profile verified on 2026-08-25 and a
-combined SWING cost path that layers MTF funding charges on top of resident equity
-transaction costs.
+One BSE analysis launches two independent horizons:
 
-The base `equity_costs.py` engine remains a non-MTF transaction-cost component so
-historical calculations are not silently rewritten.
+```text
+INTRADAY graph
+SWING · MTF graph
+```
 
-The legacy Phase-6 paper ledger was designed around full-notional cash reservation.
-The public API must not present that old own-cash SWING representation as active SWING.
-MTF-aware paper/journal reconciliation is a deeper integration item, not permission to
-fall back to CNC.
+Each has its own task/progress/result. Neither may substitute for the other.
 
-## Validation state
+Both final decision layers consume the same audited deterministic hierarchy when available:
 
-The original preserved framework checkpoint is unchanged at:
+```text
+1D dominant trend -> derived 4H structure -> 1H setup -> 15m entry refinement
+```
 
-`5d8ff95c013a9091f576591dbbe9bae4439c099e`
+Missing, stale or conflicting evidence remains explicit and fail-closed. The models are not allowed to invent missing timeframe values.
 
-The first post-checkpoint repair commit is:
+## BSE market-data / evidence plane complete
 
-`909d26eab10c2c4eb731889a0339a929921da4f3`
-`fix(ci): align foundation tests with current Phase 6 APIs`
+- Kite Connect is the preferred authenticated market-data source
+- Kite role is `MARKET_DATA_ONLY`
+- audited `RAW_UNADJUSTED` BSE OHLCV store
+- completed-bar / as-of replay contract
+- 1D / derived 4H / 1H / 15m hierarchy
+- live Kite BSE quote plane
+- source provenance retained
+- Yahoo/yfinance remains explicitly labelled fallback/research data only where allowed
 
-Foundation run #494 (`32887419390`) passed both:
+Real authenticated Kite success is not claimed until local credentials are supplied and tested.
 
-- `unit-tests` ✅
-- `frontend-contract` ✅
+## Broader-market context complete
 
-The unit job also passed the Phase 2/3/4/5/6/10 observational smokes and BSE evidence
-baseline build/upload.
+BSE Ltd remains the only trade target.
 
-## Kite state
+NIFTY 50 is stored in a separate **context-only audited index store** because it is an index, not an ISIN-backed listed equity.
 
-Kite remains `MARKET_DATA_ONLY`. Historical candles, quotes, WebSocket state and market
-depth are supported. No place/modify/cancel order path exists.
+When Kite data is available:
 
-Real authenticated Kite success is not claimed until real credentials are configured and
-validated.
+```text
+Kite NIFTY 50 daily history
+-> completed audited context bars
+-> broader-market correction context
+```
 
-## What remains after the v0.13 MTF correction
+If audited NIFTY context is unavailable, the broader-market state stays `UNKNOWN`. Trade Brain does not silently substitute unaudited web/yfinance data into a hard live risk gate. Missing optional NIFTY context also does not invalidate an otherwise successful BSE study cycle.
 
-1. Keep CI green after the MTF-only policy/API change.
-2. Make the paper ledger and actual-trade journal explicitly MTF-aware rather than using
-   legacy full-notional SWING accounting.
-3. Continue deeper live BSE integration: market-state guards, material-change recompute,
-   multi-timeframe runtime use and after-market study automation.
-4. Authenticate/validate real Kite data when credentials are supplied.
-5. Continue future-only prospective BSE evidence.
-6. Do not merge PR #1 into `main` unless the owner explicitly asks.
+## Corporate-event / split safety complete
+
+- official NSE/BSE corporate-event memory
+- reviewed/archived official events remain permanent evidence; inbox status does not erase truth
+- explicit split/dividend normalization
+- ex-date/record-date/ratio values are never guessed
+- official stock splits create raw-price comparability eras
+- raw OHLC is never rewritten
+- dividends are mechanical ex-date context, not structural split eras
+- replay blocks raw-price comparisons that cross split eras
+- regression coverage prevents a mechanical split reset from becoming a false stop-loss or false MTF loss
+
+## MTF economics / replay complete
+
+- resident equity transaction-cost component
+- Zerodha MTF incremental brokerage/pledge/unpledge/interest model
+- funded amount modeled explicitly
+- user cash contribution modeled separately from total position value
+- MTF break-even solver
+- SWING MTF paper ledger
+- strict SWING MTF replay
+- replay refuses to guess interest days
+- replay refuses unverified MTF eligibility
+- replay blocks cross-split raw-price economics
+- net P&L and return on user cash contribution available
+
+Phase-6 smoke now validates both:
+
+1. synthetic observed-history INTRADAY paper economics; and
+2. explicit SWING MTF funded/interest economics.
+
+No broker order API is used in either validation path.
+
+## Position Guardian / actual trades complete
+
+- manual actual BSE trade journal
+- advisory linkage
+- partial closes
+- actual/estimated charge tracking
+- MTF metadata for SWING
+- live/open mark economics
+- read-only Position Guardian
+- Guardian visible directly on Actual Trades
+- event/news risk
+- BSE correction state
+- audited NIFTY broader-market correction when available
+- split/dividend reconciliation warnings
+- stop/target review
+- intraday hard-exit review
+
+Guardian cannot place, modify or cancel broker orders.
+
+## Learning / research boundary complete
+
+- market-session advisory/monitoring mode
+- after-market scheduled study mode
+- audited replay
+- pattern/structure research
+- point-in-time news memory
+- challenger/frozen-definition workflow
+- human approval required for soft-parameter promotion
+- hard rules cannot silently self-modify
+- prospective evidence kept separate from hindsight exploration
+
+`BSE_PROSPECTIVE_HYPOTHESIS_001` remains frozen for future-only evidence after `2026-08-21`.
+
+No profitability or win-rate claim is implied by historical descriptive evidence.
+
+## Active frontend surface
+
+The BSE product exposes only:
+
+- BSE Today
+- BSE Analysis
+- Analysis detail
+- Price & Structure
+- Analysis Outcomes
+- BSE Evidence
+- BSE Context / News
+- Actual Trades
+- Settings
+
+Old generic ITA scanner/recommender/backtest/simulation/calibration/strategy/shadow-trade/memory-admin route entry points have been removed from this branch. A regression test locks the BSE-only route set.
+
+Generic backend files may remain only as unmounted/reusable research infrastructure; they are not active trade-discovery routes.
+
+## Windows readiness complete
+
+- `Start-TradeBrain.ps1`
+- `Start-TradeBrain.bat`
+- `WINDOWS_SETUP.md`
+- PowerShell launcher parse validated
+- prerequisite preflight validated
+- BAT wrapper validated
+- clean first-run setup validated
+- backend health validated
+- frontend startup/health validated
+- clean process shutdown validated
+
+## What is actually left before real advisory use
+
+The framework/integration build is no longer the blocker. Remaining work is local/runtime setup:
+
+1. Configure local LLM credentials — Groq primary and Gemini verifier/fallback behavior as configured.
+2. Configure the local Kite API key without committing secrets.
+3. Complete the normal local Kite access-token/auth flow.
+4. Launch `Start-TradeBrain.bat` on the Windows machine.
+5. Confirm `/api/health` and the BSE frontend open locally.
+6. Verify a real authenticated Kite BSE quote/history sync and optional NIFTY context sync.
+7. Run the first real BSE dual-horizon advisory with broker order execution still OFF.
+
+GitHub CI intentionally has no user broker credentials, so it cannot claim authenticated Kite success.
+
+After those local checks, Trade Brain is ready for advisory use and continued prospective learning. Broker execution remains intentionally disabled unless a separate future owner decision explicitly changes that boundary.
 
 ## Do not reintroduce without explicit owner decision
 
