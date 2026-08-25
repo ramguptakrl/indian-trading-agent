@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAnalysisStore } from "@/lib/store";
+import { getIndiaMarketDate } from "@/lib/market-time";
 import { DecisionCard } from "@/components/analysis/DecisionCard";
 import { AgentProgress } from "@/components/analysis/AgentProgress";
 import { ReportPanel } from "@/components/analysis/ReportPanel";
@@ -33,9 +34,8 @@ function AnalysisPageInner() {
   const analysis = useAnalysisStore();
 
   const [tickerInput, setTickerInput] = useState(defaultTicker || analysis.ticker || "");
-  const [tradeDateInput, setTradeDateInput] = useState(
-    analysis.tradeDate || new Date().toISOString().split("T")[0]
-  );
+  const [tradeDateInput, setTradeDateInput] = useState(analysis.tradeDate || "");
+  const [indiaToday, setIndiaToday] = useState("");
   const [selectedAnalysts, setSelectedAnalysts] = useState<string[]>([
     "market", "social", "news", "fundamentals",
   ]);
@@ -43,8 +43,20 @@ function AnalysisPageInner() {
   const [language, setLanguage] = useState("English");
   const [calcOpen, setCalcOpen] = useState(false);
 
+  useEffect(() => {
+    const refreshIndiaDate = () => {
+      const istDate = getIndiaMarketDate();
+      setIndiaToday(istDate);
+      setTradeDateInput((current) => current || analysis.tradeDate || istDate);
+    };
+
+    refreshIndiaDate();
+    const timer = window.setInterval(refreshIndiaDate, 60_000);
+    return () => window.clearInterval(timer);
+  }, [analysis.tradeDate]);
+
   const handleRun = () => {
-    if (!tickerInput.trim()) return;
+    if (!tickerInput.trim() || !tradeDateInput) return;
     analysis.start(tickerInput.trim(), tradeDateInput, {
       analysts: selectedAnalysts,
       max_debate_rounds: depth,
@@ -90,18 +102,26 @@ function AnalysisPageInner() {
                 disabled={analysis.status === "running"}
               />
             </div>
-            <div className="w-44">
-              <label className="text-xs text-muted-foreground mb-1 block">Analysis Date</label>
+            <div className="w-52">
+              <label className="text-xs text-muted-foreground mb-1 block">
+                Analysis Date <span className="font-semibold text-foreground">(India / IST)</span>
+              </label>
               <Input
                 type="date"
                 value={tradeDateInput}
+                max={indiaToday || undefined}
                 onChange={(e) => setTradeDateInput(e.target.value)}
                 disabled={analysis.status === "running"}
               />
+              {indiaToday && (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Defaults to India market date: {indiaToday}
+                </p>
+              )}
             </div>
             <Button
               onClick={handleRun}
-              disabled={analysis.status === "running" || !tickerInput.trim()}
+              disabled={analysis.status === "running" || !tickerInput.trim() || !tradeDateInput}
               className="h-10"
             >
               {analysis.status === "running" ? (
