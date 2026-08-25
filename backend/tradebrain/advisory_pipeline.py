@@ -3,8 +3,8 @@
 The upstream multi-agent graph produces research prose. This module accepts only its
 explicit structured fields, then applies verified calendar state, deterministic Trade
 Brain policy, human-reviewed soft preferences, and resident transaction-cost economics.
-It never turns free-form bullish/bearish prose into a trade by inference and never
-places an order.
+Active SWING is LONG-only Zerodha MTF-funded. The pipeline never turns free-form prose
+into trade permission and never places an order.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from backend.tradebrain.equity_costs import calculate_equity_trade_costs
 from backend.tradebrain.exchange_calendar import session_for_date
 from backend.tradebrain.policy import TradePlan, evaluate_trade_plan
 from backend.tradebrain.schedule import get_operating_mode
+from backend.tradebrain.swing_mtf import calculate_swing_mtf_trade_costs
 from backend.tradebrain.trade_modes import to_active_mode
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -106,8 +107,6 @@ def parse_agent_candidate(text: str) -> dict[str, Any]:
         errors.append("Missing or unsupported Candidate Verdict field")
 
     safe_no_trade = verdict in SAFE_VERDICTS if verdict else False
-    # Direction NONE is normalized to parsed["direction"] == None. Treat an explicit
-    # SELL/EXIT + no direction as reduction/exit context, never as a fresh short.
     exit_only = verdict in EXIT_VERDICTS and parsed["direction"] is None
     if safe_no_trade or exit_only:
         parsed.update(
@@ -133,7 +132,10 @@ def parse_agent_candidate(text: str) -> dict[str, Any]:
     if verdict in SHORT_VERDICTS and direction != "SHORT":
         errors.append("SHORT candidate verdict requires Direction SHORT")
     if verdict in EXIT_VERDICTS:
-        errors.append("SELL/EXIT is a reduction/exit label, not permission to initiate a fresh position; use SHORT CANDIDATE for a new intraday short")
+        errors.append(
+            "SELL/EXIT is a reduction/exit label, not permission to initiate a fresh position; "
+            "use SHORT CANDIDATE for a new intraday short"
+        )
 
     if errors:
         parsed.update(
@@ -177,30 +179,82 @@ def _cost_scenarios(plan: TradePlan, *, quantity: int | None, slippage_bps: floa
             "status": "NOT_COMPUTED_QUANTITY_REQUIRED",
             "profile_scope": "RESIDENT_INDIAN_TRANSACTION_COSTS_BEFORE_INCOME_TAX",
             "quantity": None,
-            "note": "Capital-gains/income-tax liability is not included in per-trade transaction-cost P&L.",
+            "note": "Quantity is required for net rupee economics. Personal income/capital-gains tax is excluded.",
         }
-    target = calculate_equity_trade_costs(
-        mode=plan.mode, exchange=plan.exchange, direction=plan.direction,
-        entry_price=plan.entry, exit_price=plan.take_profit, quantity=quantity,
-        slippage_bps=slippage_bps,
-    )
-    stop = calculate_equity_trade_costs(
-        mode=plan.mode, exchange=plan.exchange, direction=plan.direction,
-        entry_price=plan.entry, exit_price=plan.stop_loss, quantity=quantity,
-        slippage_bps=slippage_bps,
-    )
+
+    if to_active_mode(plan.mode) == "SWING":
+        if (
+            plan.swing_funding != "MTF"
+            or plan.mtf_eligible_verified is not True
+            or plan.funded_amount is None
+            or plan.funded_amount <= 0
+        ):
+            return {
+                "status": "NOT_COMPUTED_MTF_FUNDING_UNVERIFIED",
+                "profile_scope": "RESIDENT_INDIAN_EQUITY_PLUS_ZERODHA_MTF_BEFORE_INCOME_TAX",
+                "quantity": quantity,
+                "note": "Active SWING requires verified MTF eligibility and funded_amount.",
+            }
+        if plan.mtf_interest_days is None or plan.mtf_interest_days < 1:
+            return {
+                "status": "NOT_COMPUTED_MTF_INTEREST_DAYS_REQUIRED",
+                "profile_scope": "RESIDENT_INDIAN_EQUITY_PLUS_ZERODHA_MTF_BEFORE_INCOME_TAX",
+                "quantity": quantity,
+                "note": "A positive MTF interest-days scenario is required; Trade Brain will not invent a holding period.",
+            }
+        target = calculate_swing_mtf_trade_costs(
+            exchange=plan.exchange,
+            entry_price=plan.entry,
+            exit_price=plan.take_profit,
+            quantity=quantity,
+            funded_amount=plan.funded_amount,
+            interest_days=plan.mtf_interest_days,
+            slippage_bps=slippage_bps,
+        )
+        stop = calculate_swing_mtf_trade_costs(
+            exchange=plan.exchange,
+            entry_price=plan.entry,
+            exit_price=plan.stop_loss,
+            quantity=quantity,
+            funded_amount=plan.funded_amount,
+            interest_days=plan.mtf_interest_days,
+            slippage_bps=slippage_bps,
+        )
+        scope = "RESIDENT_INDIAN_EQUITY_PLUS_ZERODHA_MTF_BEFORE_INCOME_TAX"
+    else:
+        target = calculate_equity_trade_costs(
+            mode=plan.mode,
+            exchange=plan.exchange,
+            direction=plan.direction,
+            entry_price=plan.entry,
+            exit_price=plan.take_profit,
+            quantity=quantity,
+            slippage_bps=slippage_bps,
+        )
+        stop = calculate_equity_trade_costs(
+            mode=plan.mode,
+            exchange=plan.exchange,
+            direction=plan.direction,
+            entry_price=plan.entry,
+            exit_price=plan.stop_loss,
+            quantity=quantity,
+            slippage_bps=slippage_bps,
+        )
+        scope = "RESIDENT_INDIAN_TRANSACTION_COSTS_BEFORE_INCOME_TAX"
+
     net_reward = float(target["net_pnl"])
     net_loss = abs(float(stop["net_pnl"])) if float(stop["net_pnl"]) < 0 else 0.0
     return {
         "status": "COMPUTED",
-        "profile_scope": "RESIDENT_INDIAN_TRANSACTION_COSTS_BEFORE_INCOME_TAX",
+        "profile_scope": scope,
         "quantity": quantity,
         "target_scenario": target,
         "stop_scenario": stop,
         "net_reward_rupees": round(net_reward, 2),
         "net_loss_rupees": round(net_loss, 2),
         "net_reward_risk": round(net_reward / net_loss, 4) if net_reward > 0 and net_loss > 0 else None,
-        "note": "Includes modeled resident transaction costs/slippage; excludes personal income/capital-gains tax liability.",
+        "mtf_used": to_active_mode(plan.mode) == "SWING",
+        "note": "Includes modeled transaction costs/slippage and MTF funding costs for SWING; excludes personal income/capital-gains tax.",
     }
 
 
@@ -215,19 +269,18 @@ def evaluate_final_advisory(
     broker_allows_trade: bool | None = None,
     require_verified_calendar: bool = True,
     slippage_bps: float = 0.0,
+    swing_funding: str | None = None,
+    mtf_eligible_verified: bool | None = None,
+    funded_amount: float | None = None,
+    mtf_interest_days: int | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any]:
-    """Convert explicit agent structure into a deterministic advisory result.
-
-    A fresh-entry candidate cannot reach the policy gate until calendar, Crash Guard,
-    and broker/exchange permission states are explicit. Unknown deterministic facts
-    block validation rather than being guessed from agent prose.
-    """
+    """Convert explicit agent structure into a deterministic advisory result."""
 
     parsed = parse_agent_candidate(final_trade_decision)
     now = _aware(evaluated_at)
     base = {
-        "tradebrain_version": "0.11.0",
+        "tradebrain_version": "0.13.0",
         "ticker": ticker.strip().upper(),
         "exchange": exchange.strip().upper(),
         "evaluated_at_ist": now.isoformat(),
@@ -272,12 +325,17 @@ def evaluate_final_advisory(
 
     if parsed["mode"] == "INTRADAY":
         operating = get_operating_mode(
-            now, exchange=base["exchange"], db_path=db_path,
+            now,
+            exchange=base["exchange"],
+            db_path=db_path,
             require_verified_calendar=require_verified_calendar,
         )
         base["operating_mode"] = operating
         if operating.get("intraday_trade_state") in {
-            "CLOSED", "CALENDAR_UNVERIFIED", "SPECIAL_SESSION_PENDING_TIMES", "SPECIAL_SESSION_RESEARCH_ONLY"
+            "CLOSED",
+            "CALENDAR_UNVERIFIED",
+            "SPECIAL_SESSION_PENDING_TIMES",
+            "SPECIAL_SESSION_RESEARCH_ONLY",
         }:
             base["final_status"] = f"BLOCK_{operating['intraday_trade_state']}"
             base["gate"] = None
@@ -296,11 +354,22 @@ def evaluate_final_advisory(
         return base
 
     plan = TradePlan(
-        ticker=base["ticker"], exchange=base["exchange"], mode=parsed["mode"],
-        direction=parsed["direction"], entry=parsed["entry"], stop_loss=parsed["stop_loss"],
-        take_profit=parsed["take_profit"], quantity=quantity, crash_guard=crash_guard,
+        ticker=base["ticker"],
+        exchange=base["exchange"],
+        mode=parsed["mode"],
+        direction=parsed["direction"],
+        entry=parsed["entry"],
+        stop_loss=parsed["stop_loss"],
+        take_profit=parsed["take_profit"],
+        quantity=quantity,
+        crash_guard=crash_guard,
         broker_allows_trade=broker_allows_trade,
-        evidence=["AI_STRUCTURED_CANDIDATE_NOT_SOURCE_OF_TRUTH"], evaluated_at_ist=now,
+        evidence=["AI_STRUCTURED_CANDIDATE_NOT_SOURCE_OF_TRUTH"],
+        evaluated_at_ist=now,
+        swing_funding=swing_funding,
+        mtf_eligible_verified=mtf_eligible_verified,
+        funded_amount=funded_amount,
+        mtf_interest_days=mtf_interest_days,
     )
     gate = evaluate_trade_plan(plan, db_path=db_path)
     base["gate"] = gate.model_dump()
@@ -314,10 +383,16 @@ def evaluate_final_advisory(
         "soft_preferred_reward_risk": gate.preferred_reward_risk,
         "soft_preference_source": gate.preferred_reward_risk_source,
         "soft_parameter_version": gate.soft_parameter_version,
+        "swing_funding": gate.swing_funding,
+        "mtf_eligible_verified": gate.mtf_eligible_verified,
+        "funded_amount": gate.funded_amount,
+        "mtf_interest_days": gate.mtf_interest_days,
     }
     base["costs"] = _cost_scenarios(plan, quantity=quantity, slippage_bps=slippage_bps)
 
-    if gate.action == "PASS":
+    if gate.action == "PASS" and base["costs"].get("status") != "COMPUTED" and gate.active_mode == "SWING":
+        base["final_status"] = "WAIT"
+    elif gate.action == "PASS":
         base["final_status"] = "ADVISORY_CANDIDATE_PASS"
     elif gate.action == "WAIT":
         base["final_status"] = "WAIT"

@@ -1,11 +1,11 @@
 """Trade Brain active product-mode and funding boundary.
 
-Trade horizon and funding are deliberately separate dimensions:
+Active product doctrine:
 - INTRADAY: same-session cash-equity LONG/SHORT; no overnight short.
-- SWING: LONG-only; funding may be own-cash CNC or verified MTF.
+- SWING: LONG-only Zerodha MTF-funded multi-day equity.
 
-Older DAY / SWING_POSITION values remain readable aliases so historical rows do not
-need destructive migration.
+Older DAY / SWING_POSITION mode labels and CNC_OWN_CASH funding labels remain readable
+for historical audit/replay compatibility. Historical readability is not live permission.
 """
 
 from __future__ import annotations
@@ -17,7 +17,10 @@ CompatibleTradeMode = Literal["INTRADAY", "SWING", "DAY", "SWING_POSITION"]
 SwingFundingMode = Literal["CNC_OWN_CASH", "MTF"]
 
 ACTIVE_TRADE_MODES = ("INTRADAY", "SWING")
-SWING_FUNDING_MODES = ("CNC_OWN_CASH", "MTF")
+ACTIVE_SWING_FUNDING_MODES = ("MTF",)
+LEGACY_SWING_FUNDING_MODES = ("CNC_OWN_CASH",)
+READABLE_SWING_FUNDING_MODES = ACTIVE_SWING_FUNDING_MODES + LEGACY_SWING_FUNDING_MODES
+
 LEGACY_TO_ACTIVE = {
     "DAY": "INTRADAY",
     "SWING_POSITION": "SWING",
@@ -44,10 +47,15 @@ def to_legacy_mode(value: str) -> Literal["DAY", "SWING_POSITION"]:
 
 
 def to_swing_funding(value: str) -> SwingFundingMode:
+    """Parse current and historical funding labels without granting live permission."""
     key = str(value).strip().upper()
-    if key not in SWING_FUNDING_MODES:
-        raise ValueError("Swing funding must be CNC_OWN_CASH or MTF")
+    if key not in READABLE_SWING_FUNDING_MODES:
+        raise ValueError("Swing funding must be MTF; CNC_OWN_CASH is historical compatibility only")
     return key  # type: ignore[return-value]
+
+
+def is_active_swing_funding(value: str | None) -> bool:
+    return bool(value) and str(value).strip().upper() == "MTF"
 
 
 def is_intraday(value: str) -> bool:
@@ -63,9 +71,15 @@ def product_boundary() -> dict:
         "trader_profile": "RESIDENT_INDIAN",
         "active_trade_modes": list(ACTIVE_TRADE_MODES),
         "swing_long_only": True,
-        "swing_funding_modes": list(SWING_FUNDING_MODES),
+        "swing_funding_modes": list(READABLE_SWING_FUNDING_MODES),
+        "swing_funding_modes_semantics": "READABLE_COMPATIBILITY_LABELS",
+        "active_swing_funding_modes": list(ACTIVE_SWING_FUNDING_MODES),
+        "swing_funding_required": "MTF",
+        "legacy_readable_swing_funding_labels": list(LEGACY_SWING_FUNDING_MODES),
+        "cnc_own_cash_active_swing_allowed": False,
         "mtf_enabled_for_research_and_cost_modeling": True,
         "funded_amount_modeled": True,
+        "mtf_eligibility_must_be_verified": True,
         "mtf_broker_order_execution_enabled": False,
         "derivatives_enabled": False,
         "intraday_short_overnight_allowed": False,

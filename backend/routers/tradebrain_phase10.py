@@ -28,21 +28,26 @@ class FinalAdvisoryRequest(BaseModel):
     broker_allows_trade: bool
     require_verified_calendar: bool = True
     slippage_bps: float = Field(default=0.0, ge=0, le=500)
+    swing_funding: Literal["MTF", "CNC_OWN_CASH"] | None = None
+    mtf_eligible_verified: bool | None = None
+    funded_amount: float | None = Field(default=None, ge=0)
+    mtf_interest_days: int | None = Field(default=None, ge=0)
 
 
 @router.get("/phase10/doctrine")
 def phase10_doctrine():
     return {
         "phase": 10,
-        "tradebrain_version": "0.11.0",
+        "tradebrain_version": "0.13.0",
         "final_pipeline": [
             "STRICT_STRUCTURED_AI_CANDIDATE_PARSE",
             "VERIFIED_EXCHANGE_CALENDAR",
             "EXPLICIT_CRASH_GUARD_STATE",
             "EXPLICIT_BROKER_EXCHANGE_PERMISSION",
             "DETERMINISTIC_HARD_RULE_GATE",
+            "SWING_MTF_ONLY_FUNDING_GATE",
             "HUMAN_APPROVED_SOFT_RUNTIME",
-            "RESIDENT_TRANSACTION_COST_SCENARIOS",
+            "RESIDENT_PLUS_MTF_NET_COST_SCENARIOS",
             "ADVISORY_ONLY_OUTPUT",
         ],
         "free_form_trade_inference": False,
@@ -50,7 +55,10 @@ def phase10_doctrine():
         "trade_authorization": False,
         "order_execution_allowed": False,
         "order_endpoint_present": False,
-        "mtf_enabled": False,
+        "mtf_enabled": True,
+        "mtf_scope": "SWING_LONG_ONLY_RESEARCH_AND_COST_MODELING",
+        "swing_funding": "MTF_ONLY",
+        "cnc_own_cash_active_swing_allowed": False,
         "active_modes": ["INTRADAY", "SWING"],
         "human_readable_txt_audit": True,
         "hidden_chain_of_thought_persisted": False,
@@ -66,8 +74,6 @@ def phase10_parse_candidate(data: CandidateParseRequest):
 def phase10_final_advisory(data: FinalAdvisoryRequest):
     try:
         result = evaluate_final_advisory(**data.model_dump())
-        # Do not persist the raw LLM prose here. The result already contains the
-        # strict parsed fields and deterministic gate result needed for auditability.
         request_audit = data.model_dump(exclude={"final_trade_decision"})
         audit_final_advisory(result, request=request_audit)
         return result
@@ -88,7 +94,11 @@ def phase10_acceptance_boundary():
     return {
         "trader_profile": "RESIDENT_INDIAN",
         "active_modes": ["INTRADAY", "SWING"],
-        "mtf_enabled": False,
+        "swing_funding": "MTF_ONLY",
+        "mtf_enabled": True,
+        "mtf_eligibility_must_be_verified": True,
+        "funded_amount_required_for_swing_pass": True,
+        "mtf_interest_days_required_for_net_cost_swing_pass": True,
         "nri_kite_credential_role": "MARKET_DATA_ONLY",
         "order_execution_enabled": False,
         "raw_agent_buy_sell_is_trade_permission": False,

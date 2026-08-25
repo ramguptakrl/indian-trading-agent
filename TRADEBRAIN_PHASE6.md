@@ -1,154 +1,52 @@
-# Trade Brain Phase 6 — Resident INTRADAY + SWING Economics / Paper Ledger
+# Trade Brain Phase 6 — Resident Costs, MTF SWING Economics and Paper Compatibility
 
-Status: implemented in Trade Brain **v0.7.0**.
+Status: revised for Trade Brain **v0.13.0** on 2026-08-25.
 
 ## Product decision
 
-Phase 6 removes MTF from the active architecture. There are only two user-facing trade modes:
+Active modes remain:
 
 - `INTRADAY`
 - `SWING`
 
-The modeled trader is a **resident Indian person**.
+`SWING` is LONG-only and **MTF-funded only** in the active product. MTF is funding, not
+a third mode. Historical own-cash SWING records remain readable but are not live
+permission.
 
-Historical Phase 0-5 persistence used the labels `DAY` and `SWING_POSITION`. Those remain readable internal aliases solely to preserve replay/audit continuity. They do not represent additional active modes.
+## Cost layers
 
-## Data credential is not trader identity
+### Base resident equity component
 
-A Zerodha/Kite API credential may later be used for:
+`backend/tradebrain/equity_costs.py` remains versioned and non-MTF. It calculates
+resident equity statutory/transaction costs and preserves historical reproducibility.
 
-- live quotes / WebSocket ticks;
-- historical candles;
-- backtest/replay data.
+### Zerodha MTF incremental component
 
-The credential may belong to an NRI account. That does not change the modeled trader profile.
+`backend/tradebrain/mtf_economics.py` models the separately versioned MTF funding layer:
+funded amount, daily interest, MTF brokerage, pledge/unpledge and applicable RMS
+square-off charges.
 
-Phase 6 explicitly records:
+### Active SWING combined component
 
-- trader profile: `RESIDENT_INDIAN`
-- credential role: `MARKET_DATA_ONLY`
-- credential account type affects policy: `false`
-- credential account type affects cost profile: `false`
-- order API enabled: `false`
+`backend/tradebrain/swing_mtf.py` combines both layers for SWING target/stop/break-even
+net economics. It never exposes broker execution.
 
-Therefore NRI brokerage, PIS/Non-PIS rules, NRI TDS treatment and NRI product restrictions are not imported into the resident system merely because the data credential is NRI.
+## Public API boundary
 
-## Resident equity cost profile
+Phase 6 exposes dedicated MTF rules, SWING MTF cost and SWING MTF net-target routes.
 
-The first versioned profile is:
+The generic base-equity cost/net-target routes reject `mode=SWING` so callers cannot
+accidentally treat active SWING as zero-financing own-cash delivery.
 
-`ZERODHA_RESIDENT_INDIVIDUAL_EQUITY_2026_08`
+The legacy Phase-6 paper ledger was built around full-notional cash reservation. Its
+public open-position route rejects new SWING use until MTF funding fields are integrated.
+Historical/direct compatibility records are not reinterpreted.
 
-Verified on 2026-08-21 against Zerodha's public resident-individual/charges documentation.
+## Safety
 
-The engine models:
-
-- resident equity delivery brokerage;
-- resident equity intraday brokerage;
-- STT;
-- NSE/BSE transaction charges;
-- SEBI turnover fee;
-- equity IPFT charge;
-- GST on service/regulatory charge base;
-- buy-side stamp duty;
-- delivery/SWING DP charge;
-- optional adverse slippage on both sides.
-
-The profile is versioned so historical simulations do not silently change when future charges change.
-
-BSE transaction rates can differ for special scrip groups. The standard published equity rate is the default; callers can supply a verified transaction-charge override when the security group requires it.
-
-## Explicitly absent economics
-
-Phase 6 contains no:
-
-- MTF interest;
-- funded amount;
-- pledge/unpledge MTF fee;
-- margin-funded delivery;
-- overnight financing calculation.
-
-The cost result always exposes `mtf_used=false`, `funded_amount=0`, and `financing_interest=0`.
-
-## True net economics
-
-Given mode, direction, exchange, quantity, entry, exit and optional slippage, the engine calculates:
-
-- entry/exit fill after adverse slippage;
-- buy/sell turnover;
-- gross P&L;
-- every modeled charge component;
-- total charges;
-- net P&L;
-- net return on entry notional;
-- raw exit quote required to break even after costs.
-
-A target solver can also find the raw exit quote required for a desired **net** rupee profit.
-
-## Paper ledger
-
-Phase 6 adds a Trade Brain paper ledger separate from the repository's generic recommendation simulator.
-
-Persistence:
-
-- `tb_phase6_paper_accounts`
-- `tb_phase6_paper_positions`
-
-Paper accounts require an explicit starting cash amount; no user capital is silently assumed.
-
-### Buying power
-
-Paper buying power is deliberately conservative:
-
-`CASH_NOTIONAL_CONSERVATIVE`
-
-The ledger reserves full entry notional plus a charge cushion. It does not assume broker intraday leverage and does not use MTF.
-
-### INTRADAY
-
-- LONG or SHORT.
-- Fill must represent an Indian cash-market session fill.
-- No new paper entry from 15:10 IST.
-- Expected to close by 15:15 IST on the same session date.
-- A later/overnight close is allowed only so the paper ledger can recover and record the breach; it is flagged `mode_violation=true` rather than pretending the trade was valid.
-
-### SWING
-
-- LONG only.
-- Cash/delivery economics.
-- Own-cash funding only.
-- DP charge included on sale.
-
-### Closing
-
-Closing a paper position:
-
-1. computes the complete round-trip resident cost result;
-2. stores gross P&L, total charges and net P&L;
-3. releases reserved virtual cash;
-4. applies realized **net** P&L exactly once;
-5. records any mode violation.
-
-No broker order is sent.
-
-## API
-
-Phase 6 adds `/api/tradebrain/phase6/...` endpoints for:
-
-- doctrine/product boundary;
-- resident cost profile;
-- data-credential boundary;
-- equity round-trip costs;
-- desired-net-profit target solver;
-- create/read paper accounts;
-- open/read/close paper positions;
-- list account positions;
-- paper-ledger statistics.
-
-There is deliberately no order-placement endpoint.
-
-## Interpretation boundary
-
-The cost engine is an accounting model based on a versioned verified charge snapshot, not a broker contract note. Statutory/broker rates can change and BSE group-specific transaction charges can differ. Before production use, refresh/version the profile from current official broker/exchange documentation rather than mutating historical results.
-
-Automatic execution remains OFF.
+- SWING SHORT remains blocked.
+- Active SWING requires verified MTF eligibility.
+- Funded amount must be explicit.
+- Holding/interest days are explicit for complete net economics.
+- Kite credentials remain market-data-only.
+- No order placement endpoint exists.

@@ -5,9 +5,8 @@ the final deterministic gate for a structured trade plan. It does not place orde
 cannot be overridden by an LLM response.
 
 Active product modes are INTRADAY and SWING. Historical DAY and SWING_POSITION values
-remain compatibility aliases. SWING is LONG-only and separates trade horizon from
-funding: own-cash CNC or verified MTF. Human-approved soft R:R versions may change an
-advisory WAIT preference, but never a hard rule.
+remain compatibility aliases. Active SWING is LONG-only and MTF-funded. Historical
+CNC_OWN_CASH labels remain readable but are not an active SWING funding choice.
 """
 
 from __future__ import annotations
@@ -50,6 +49,7 @@ class TradePlan(BaseModel):
     swing_funding: SwingFunding | None = None
     mtf_eligible_verified: bool | None = None
     funded_amount: float | None = Field(default=None, ge=0)
+    mtf_interest_days: int | None = Field(default=None, ge=0)
     available_cash: float | None = Field(default=None, ge=0)
 
     @field_validator("mode", mode="before")
@@ -83,6 +83,7 @@ class GateResult(BaseModel):
     funding_review_required: bool = False
     mtf_eligible_verified: bool | None = None
     funded_amount: float | None = None
+    mtf_interest_days: int | None = None
 
 
 def _now_ist(value: datetime | None) -> datetime:
@@ -121,8 +122,6 @@ def evaluate_trade_plan(plan: TradePlan, *, db_path: str | None = None) -> GateR
             failures.append("SHORT requires take_profit < entry < stop_loss")
 
     if active_mode == "SWING" and plan.direction == "SHORT":
-        # Keep the legacy phrase because historical audit/tests use SWING_POSITION as
-        # the persisted alias; the active product name remains SWING.
         failures.append("SWING_POSITION short is not allowed; active SWING mode is LONG-only equity")
 
     if not plan.broker_allows_trade:
@@ -142,17 +141,21 @@ def evaluate_trade_plan(plan: TradePlan, *, db_path: str | None = None) -> GateR
     else:
         if plan.swing_funding is None:
             funding_review_required = True
-            warnings.append("SWING funding not specified; choose CNC_OWN_CASH or verified MTF before treating the candidate as actionable")
-        elif plan.swing_funding == "MTF":
+            warnings.append("Active SWING is MTF-only; explicit MTF funding details are required before PASS")
+        elif plan.swing_funding != "MTF":
+            failures.append("Active SWING requires Zerodha MTF funding; CNC_OWN_CASH is historical compatibility only")
+        else:
             if plan.mtf_eligible_verified is not True:
                 failures.append("MTF SWING requires current broker/security MTF eligibility to be verified")
             if plan.funded_amount is None or plan.funded_amount <= 0:
+                failures.append("MTF SWING requires a positive funded_amount")
+            if plan.quantity is not None and plan.funded_amount is not None:
+                notional = float(plan.entry) * int(plan.quantity)
+                if plan.funded_amount >= notional:
+                    failures.append("MTF funded_amount must be below the modeled entry notional")
+            if plan.mtf_interest_days is None or plan.mtf_interest_days < 1:
                 funding_review_required = True
-                warnings.append("MTF funded_amount is missing; financing cost cannot be modeled yet")
-        elif plan.swing_funding == "CNC_OWN_CASH":
-            required_cash = (float(plan.entry) * int(plan.quantity)) if plan.quantity is not None else None
-            if required_cash is not None and plan.available_cash is not None and plan.available_cash < required_cash:
-                failures.append("CNC_OWN_CASH selected but available_cash is below modeled position value")
+                warnings.append("MTF interest-days scenario is required before net-cost SWING advice can PASS")
 
     rr = _reward_risk(plan)
     soft = effective_reward_risk_preference(active_mode, db_path=db_path)
@@ -203,4 +206,5 @@ def evaluate_trade_plan(plan: TradePlan, *, db_path: str | None = None) -> GateR
         funding_review_required=funding_review_required,
         mtf_eligible_verified=plan.mtf_eligible_verified if active_mode == "SWING" else None,
         funded_amount=plan.funded_amount if active_mode == "SWING" else None,
+        mtf_interest_days=plan.mtf_interest_days if active_mode == "SWING" else None,
     )

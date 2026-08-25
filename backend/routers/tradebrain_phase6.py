@@ -1,4 +1,4 @@
-"""Phase 6 API: resident INTRADAY + SWING equity economics and paper ledger."""
+"""Phase 6 API: resident INTRADAY base costs plus active SWING MTF economics."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from backend.tradebrain.equity_costs import (
     data_credential_boundary,
     solve_exit_price_for_net_profit,
 )
+from backend.tradebrain.mtf_economics import mtf_rule_snapshot
 from backend.tradebrain.paper_ledger import (
     close_paper_position,
     create_paper_account,
@@ -21,6 +22,10 @@ from backend.tradebrain.paper_ledger import (
     list_paper_positions,
     open_paper_position,
     paper_ledger_stats,
+)
+from backend.tradebrain.swing_mtf import (
+    calculate_swing_mtf_trade_costs,
+    solve_swing_mtf_exit_price_for_net_profit,
 )
 from backend.tradebrain.trade_modes import product_boundary
 
@@ -49,6 +54,34 @@ class NetTargetRequest(BaseModel):
     slippage_bps: float = Field(default=0.0, ge=0, le=500)
     transaction_charge_pct_override: float | None = Field(default=None, ge=0)
     dp_base_rupees: float | None = Field(default=None, ge=0)
+
+
+class SwingMtfCostRequest(BaseModel):
+    exchange: Literal["NSE", "BSE"] = "NSE"
+    entry_price: float = Field(gt=0)
+    exit_price: float = Field(gt=0)
+    quantity: int = Field(gt=0)
+    funded_amount: float = Field(gt=0)
+    interest_days: int = Field(ge=0)
+    slippage_bps: float = Field(default=0.0, ge=0, le=500)
+    transaction_charge_pct_override: float | None = Field(default=None, ge=0)
+    dp_base_rupees: float | None = Field(default=None, ge=0)
+    purchase_date_count: int = Field(default=1, gt=0)
+    rms_squareoff_orders: int = Field(default=0, ge=0)
+
+
+class SwingMtfNetTargetRequest(BaseModel):
+    exchange: Literal["NSE", "BSE"] = "NSE"
+    entry_price: float = Field(gt=0)
+    quantity: int = Field(gt=0)
+    funded_amount: float = Field(gt=0)
+    interest_days: int = Field(ge=0)
+    desired_net_profit: float
+    slippage_bps: float = Field(default=0.0, ge=0, le=500)
+    transaction_charge_pct_override: float | None = Field(default=None, ge=0)
+    dp_base_rupees: float | None = Field(default=None, ge=0)
+    purchase_date_count: int = Field(default=1, gt=0)
+    rms_squareoff_orders: int = Field(default=0, ge=0)
 
 
 class PaperAccountCreate(BaseModel):
@@ -88,11 +121,12 @@ def _bad_request(fn, *args, **kwargs):
 def phase6_doctrine():
     return {
         "phase": 6,
-        "tradebrain_version": "0.7.0",
+        "tradebrain_version": "0.13.0",
         **product_boundary(),
-        "paper_accounting": "NET_AFTER_RESIDENT_EQUITY_COSTS",
-        "swing_funding": "OWN_CASH_ONLY",
-        "intraday_paper_buying_power": "CASH_NOTIONAL_CONSERVATIVE",
+        "base_equity_cost_engine": "RESIDENT_TRANSACTION_COST_COMPONENT",
+        "active_swing_cost_engine": "RESIDENT_EQUITY_PLUS_ZERODHA_MTF",
+        "swing_funding": "MTF_ONLY",
+        "legacy_phase6_paper_ledger": "INTRADAY_ACTIVE; DIRECT SWING ACCESS IS COMPATIBILITY-ONLY",
         "kite_or_other_broker_credential": data_credential_boundary(),
         "automatic_execution": False,
         "orders_endpoint_in_phase6": False,
@@ -101,7 +135,24 @@ def phase6_doctrine():
 
 @router.get("/phase6/cost-profile")
 def phase6_cost_profile():
-    return cost_profile()
+    result = cost_profile()
+    return {
+        **result,
+        "profile_role": "BASE_EQUITY_TRANSACTION_COST_COMPONENT",
+        "active_swing_funding": "MTF_ONLY",
+        "mtf_incremental_profile": mtf_rule_snapshot(),
+    }
+
+
+@router.get("/phase6/mtf-rules")
+def phase6_mtf_rules():
+    return {
+        **mtf_rule_snapshot(),
+        "active_trade_mode": "SWING",
+        "direction": "LONG_ONLY",
+        "trade_authorization": False,
+        "order_execution_allowed": False,
+    }
 
 
 @router.get("/phase6/data-credential-boundary")
@@ -111,11 +162,21 @@ def phase6_data_credential_boundary():
 
 @router.post("/phase6/equity-costs")
 def phase6_equity_costs(data: EquityCostRequest):
+    if data.mode == "SWING":
+        raise HTTPException(
+            status_code=400,
+            detail="Active SWING is MTF-only. Use /api/tradebrain/phase6/swing-mtf-costs.",
+        )
     return _bad_request(calculate_equity_trade_costs, **data.model_dump())
 
 
 @router.post("/phase6/net-target")
 def phase6_net_target(data: NetTargetRequest):
+    if data.mode == "SWING":
+        raise HTTPException(
+            status_code=400,
+            detail="Active SWING is MTF-only. Use /api/tradebrain/phase6/swing-mtf-net-target.",
+        )
     payload = data.model_dump()
     desired = payload.pop("desired_net_profit")
     price = _bad_request(solve_exit_price_for_net_profit, desired_net_profit=desired, **payload)
@@ -126,6 +187,33 @@ def phase6_net_target(data: NetTargetRequest):
         "direction": data.direction,
         "mtf_used": False,
         "funding_interest": 0.0,
+    }
+
+
+@router.post("/phase6/swing-mtf-costs")
+def phase6_swing_mtf_costs(data: SwingMtfCostRequest):
+    return _bad_request(calculate_swing_mtf_trade_costs, **data.model_dump())
+
+
+@router.post("/phase6/swing-mtf-net-target")
+def phase6_swing_mtf_net_target(data: SwingMtfNetTargetRequest):
+    payload = data.model_dump()
+    desired = payload.pop("desired_net_profit")
+    price = _bad_request(
+        solve_swing_mtf_exit_price_for_net_profit,
+        desired_net_profit=desired,
+        **payload,
+    )
+    return {
+        "required_raw_exit_price": price,
+        "desired_net_profit": desired,
+        "mode": "SWING",
+        "direction": "LONG",
+        "swing_funding": "MTF",
+        "funded_amount": data.funded_amount,
+        "interest_days": data.interest_days,
+        "trade_authorization": False,
+        "order_execution_allowed": False,
     }
 
 
@@ -141,6 +229,14 @@ def phase6_get_paper_account(account_id: str):
 
 @router.post("/phase6/paper/positions")
 def phase6_open_paper_position(data: PaperPositionOpen):
+    if data.mode == "SWING":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The legacy Phase-6 paper position endpoint does not model MTF funding. "
+                "Active SWING must not be represented as own-cash paper delivery."
+            ),
+        )
     return _bad_request(open_paper_position, **data.model_dump())
 
 
@@ -165,4 +261,9 @@ def phase6_list_paper_positions(
 
 @router.get("/phase6/paper/stats")
 def phase6_paper_stats():
-    return paper_ledger_stats()
+    stats = paper_ledger_stats()
+    return {
+        **stats,
+        "active_swing_paper_permission": False,
+        "reason": "Legacy paper ledger has no MTF funding fields; active SWING own-cash representation is blocked at API boundary.",
+    }
