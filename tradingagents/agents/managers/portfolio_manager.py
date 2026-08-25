@@ -1,19 +1,5 @@
 from tradingagents.agents.utils.agent_utils import build_instrument_context, get_language_instruction
-
-
-def _horizon_instruction(requested_trade_mode: str | None) -> str:
-    mode = str(requested_trade_mode or "").strip().upper()
-    if mode == "INTRADAY":
-        return """**This is the independent INTRADAY decision run.**
-For a new candidate, `Trade Mode` MUST be INTRADAY. LONG or SHORT is allowed only with its own valid same-session setup.
-Do not switch to SWING. If INTRADAY does not qualify, output HOLD / WAIT or NO TRADE with Trade Mode NONE."""
-    if mode == "SWING":
-        return """**This is the independent SWING decision run.**
-For a new candidate, `Trade Mode` MUST be SWING and `Direction` MUST be LONG.
-Do not switch to INTRADAY or SHORT. If SWING does not qualify, output HOLD / WAIT or NO TRADE with Trade Mode NONE.
-Active SWING funding is Zerodha MTF only. Never invent current MTF eligibility, funded amount, leverage/margin percentage, or holding/interest days."""
-    return """**Legacy single-horizon selection**
-INTRADAY and SWING are the only active horizons. Choose at most one candidate horizon or HOLD / WAIT / NO TRADE. Dedicated BSE dual-horizon runs evaluate them independently."""
+from tradingagents.horizon_policy import horizon_instruction
 
 
 def create_portfolio_manager(llm, memory, requested_trade_mode: str | None = None):
@@ -37,12 +23,12 @@ def create_portfolio_manager(llm, memory, requested_trade_mode: str | None = Non
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        horizon_instruction = _horizon_instruction(requested_trade_mode)
+        horizon_context = horizon_instruction(requested_trade_mode)
         prompt = f"""You are the final Portfolio/Risk synthesis agent for Trade Brain's **BSE Ltd-only resident-Indian equity advisory system**. Synthesize the debate into a candidate decision, but NEVER describe your output as authorization to trade. A deterministic hard-rule arbiter sits above you and may BLOCK the candidate.
 
 {instrument_context}
 
-{horizon_instruction}
+{horizon_context}
 
 ---
 
