@@ -1,15 +1,15 @@
-# Trade Brain — Actual Manual Trade Journal
+# Trade Brain — Actual Manual Trade Journal + Position Guardian
 
-Trade Brain v0.12.1 adds a separate record of trades the human actually executed at a broker after reviewing an advisory.
+Status: Trade Brain **v0.13.0**.
 
 ## Purpose
 
-The journal answers a different question from replay or paper trading:
+The journal keeps human-executed evidence separate from replay and paper research:
 
 ```text
 HYPOTHETICAL_REPLAY  = what a frozen historical rule would have done
 PAPER / SIMULATION   = simulated position/account behavior
-ACTUAL_MANUAL_TRADE  = what the human really executed at the broker
+ACTUAL_MANUAL_TRADE  = what the human actually executed externally at the broker
 ```
 
 These evidence classes are intentionally not merged.
@@ -19,22 +19,23 @@ These evidence classes are intentionally not merged.
 ```text
 Trade Brain advisory
       ↓
-Human executes the trade externally at Zerodha/another broker
+Human executes externally at broker
       ↓
 I TOOK THIS TRADE
       ↓
-Record actual entry price / qty / time / mode / optional broker ref
+Record actual entry / qty / time / funding context
       ↓
-Actual Trades dashboard
+Actual Trades dashboard + read-only Position Guardian
       ↓
-Current market-data mark + estimated open net P&L
+Human executes partial/full exit externally
       ↓
-Partial Close or Close Trade after the human executes the exit externally
+Record actual exit slice(s)
       ↓
-Permanent actual fill history + realized gross/net P&L
+Permanent actual fill + outcome evidence
 ```
 
-The exact persisted Trade Brain advisory snapshot is copied into a linked actual-trade record. If the actual direction differs from the advisory, the mismatch is preserved rather than rewritten.
+The persisted advisory snapshot may be copied into the linked actual-trade record. If the
+human direction differs from the advisory, the mismatch is preserved rather than rewritten.
 
 ## Supported states
 
@@ -42,53 +43,85 @@ The exact persisted Trade Brain advisory snapshot is copied into a linked actual
 - `PARTIALLY_CLOSED`
 - `CLOSED`
 
-Partial exits are separate fill records with their own quantity, price, timestamp, charges and optional broker reference.
+Partial exits are separate fill records with their own quantity, price, timestamp, charges
+and optional broker reference.
 
-## Actual fields
+## Active fields
 
 An actual trade can record:
 
-- ticker / exchange
+- BSE Ltd / NSE identity
 - `INTRADAY` or `SWING`
-- LONG/SHORT where active policy permits it
-- actual entry quantity
-- actual entry fill price
-- actual entry timestamp
-- stop loss / target context
-- broker order/trade reference (optional)
+- actual direction where policy permits it
+- actual entry quantity / price / timestamp
+- stop-loss / primary target context
+- optional broker order/trade reference
 - notes
-- one or more actual exit fills
-- actual broker charge override per closed slice (optional)
+- one or more exit fills
+- actual broker-charge override for a closed slice
+
+For active `SWING`:
+
+- LONG only
+- funding must be `MTF`
+- current MTF eligibility verification is recorded
+- funded amount is stored separately from user cash contribution
+- explicit MTF interest-days are required for fully modeled mark/close economics
 
 ## Mark-to-market
 
-Open positions can be marked from the current Trade Brain quote path. When Kite is configured this follows the Kite-primary source hierarchy; without Kite it can use the explicitly-labelled fallback source.
+Journal mark calculations are estimates, not broker-confirmed balances.
 
-The open estimate exposes:
+For SWING MTF, estimates include resident transaction costs plus MTF financing when the
+required funding fields are present. Partial closes allocate the modeled position costs
+proportionally to the closed slice.
 
-- current price
-- unrealized gross P&L
-- estimated resident charges if closed at that mark
-- estimated open net P&L
-- realized net P&L from any already-closed slices
-- combined realized + estimated-open net P&L
+Actual broker charges may override an estimate for a closed slice without rewriting the
+recorded fills.
 
-This is a mark/estimate, not a broker-confirmed account balance.
+## Position Guardian
 
-## Charges
+Position Guardian is read-only risk interpretation layered on the journal. It does not
+replace the journal's recorded fills or place orders.
 
-Until actual broker charges are supplied, Trade Brain uses its versioned resident-equity cost model. A user may enter an `actual_charges_override` for a closed slice from the broker statement/contract note. Estimated charges must never be presented as broker-confirmed charges.
+Guardian consumes:
+
+- open/partially-closed BSE trade state;
+- **fresh persisted Kite BSE quote data**;
+- market/data-integrity guard state;
+- permanent corporate-action memory;
+- local BSE event/news risk;
+- audited BSE regime context;
+- optional audited NIFTY 50 broader-market correction context.
+
+Guardian fails closed when the persisted Kite quote is missing, malformed or stale. A
+stale quote is not allowed to trigger stop/target/HOLD interpretation.
+
+Guardian priority protects:
+
+- INTRADAY 15:15 hard exit;
+- confirmed market halt;
+- suspicious/freak tick confirmation;
+- stock-split position reconciliation;
+- dividend ex-date economic review;
+- recorded stop breach;
+- primary-target review;
+- adverse position + high-impact event/correction review.
+
+A stock-split ex-date outranks raw stop/P&L interpretation so a mechanical price reset
+cannot be mistaken for an ordinary loss before quantity/cost-basis reconciliation.
 
 ## Policy observations
 
-The journal records reality even when the real trade did not follow Trade Brain policy. Examples:
+The journal records reality even when the human trade violates Trade Brain policy, for
+example:
 
-- direction differs from the linked advisory
-- INTRADAY entry after the no-fresh-entry boundary
-- INTRADAY exit after 15:15 IST
-- INTRADAY carried overnight
+- direction differs from linked advisory;
+- INTRADAY entry after the no-fresh-entry boundary;
+- INTRADAY exit after 15:15 IST;
+- INTRADAY carried overnight.
 
-These are recorded as integrity/policy observations; the journal does not erase the real trade.
+These observations do not erase the real trade.
 
 ## Execution boundary
 
@@ -96,11 +129,11 @@ This feature is **not broker order execution**.
 
 ```text
 manual_tracking_only = true
-order_execution_enabled = false
+trade_authorization = false
+order_execution_allowed = false
 ```
 
-Buttons such as `I TOOK THIS TRADE`, `Partial Close`, and `Close Trade` only update the Trade Brain journal after the user has acted externally at the broker.
+Buttons such as `I TOOK THIS TRADE`, `Partial Close`, and `Close Trade` update the local
+Trade Brain journal only after the human has acted externally.
 
 No place/modify/cancel broker-order method is introduced by this feature.
-
-A future read-only broker-reconciliation feature may verify journal entries against broker data, but it must remain separate from order execution unless the owner explicitly changes the product boundary.
