@@ -78,6 +78,7 @@ def _core(
             "mtf_used": True,
             "funded_amount": round(float(funded_amount), 2),
             "user_cash_contribution": incremental["user_cash_contribution"],
+            "funding_interest": round(float(mtf_costs["mtf_interest"]), 2),
             "mtf_interest_days": int(interest_days),
             "mtf_profile_key": incremental["profile_key"],
             "mtf_profile_verified_on": incremental["verified_on"],
