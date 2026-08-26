@@ -12,7 +12,7 @@ The pack is evidence only. It never authorizes or places an order.
 
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from html.parser import HTMLParser
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -31,7 +31,8 @@ IST = ZoneInfo("Asia/Kolkata")
 BSE_ISIN = "INE118H01025"
 SEBI_CIRCULARS_URL = "https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=1&smid=0&ssid=7"
 SEBI_PRESS_URL = "https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=6&smid=0&ssid=23"
-METHOD_VERSION = "BSE_NEWS_EVIDENCE_OFFICIAL_FIRST_V1"
+METHOD_VERSION = "BSE_NEWS_EVIDENCE_OFFICIAL_FIRST_V2"
+MEDIA_FRESHNESS_DAYS = 30
 
 _SEBI_RELEVANCE_TERMS = (
     "stock exchange", "exchange", "clearing", "derivative", "securities market",
@@ -80,6 +81,28 @@ def _is_today_ist(trade_date: str) -> bool:
 def _clip(value: Any, limit: int = 220) -> str:
     text = " ".join(str(value or "").split())
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _media_publication_time(value: Any) -> datetime | None:
+    """Parse source publication time for freshness checks; unknown dates stay unknown."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+        for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                parsed = datetime.strptime(text, fmt)
+                break
+            except ValueError:
+                continue
+        if parsed is None:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=IST)
+    return parsed.astimezone(timezone.utc)
 
 
 def _official_bse_events(cutoff: datetime, *, limit: int = 8) -> list[dict[str, Any]]:
@@ -154,22 +177,32 @@ def _fetch_sebi_listing(url: str, *, timeout: int = 12, limit: int = 6) -> list[
 def _archived_media(cutoff: datetime, *, limit: int = 8) -> list[dict[str, Any]]:
     rows = query_news_known_by(cutoff, limit=100)
     priority = {"BSE_DIRECT": 0, "BSE_MARKET_CONTEXT": 1, "GENERAL_MARKET_CONTEXT": 2}
-    # query_news_known_by is already newest-first; stable sorting by relevance preserves
-    # newest-first order within each relevance tier.
+    # first_seen_at controls point-in-time eligibility, but source publication time controls
+    # whether an article is fresh enough to represent current news context. This prevents an
+    # old article newly discovered today from masquerading as a current catalyst.
     rows.sort(key=lambda row: priority.get(str(row.get("relevance") or ""), 9))
+    fresh_after = cutoff - timedelta(days=MEDIA_FRESHNESS_DAYS)
     output: list[dict[str, Any]] = []
-    for row in rows[:limit]:
+    for row in rows:
+        published = _media_publication_time(row.get("published_at_source"))
+        if published is None or published < fresh_after or published > cutoff:
+            continue
+        age_days = max(0, int((cutoff - published).total_seconds() // 86400))
         output.append({
             "source_tier": "MEDIA_CONTEXT",
             "source": str(row.get("source") or "UNKNOWN_MEDIA"),
-            "date": str(row.get("published_at_source") or row.get("first_seen_at") or ""),
+            "date": str(row.get("published_at_source") or ""),
             "title": _clip(row.get("title"), 260),
             "detail": _clip(row.get("summary"), 260),
             "url": str(row.get("url") or ""),
             "relevance": str(row.get("relevance") or ""),
             "official_fact": False,
             "known_by": str(row.get("first_seen_at") or ""),
+            "age_days": age_days,
+            "freshness_status": "RECENT",
         })
+        if len(output) >= limit:
+            break
     return output
 
 
@@ -213,6 +246,8 @@ def build_bse_news_evidence(trade_date: str) -> dict[str, Any]:
         "official_company_events": official_events,
         "official_sebi_context": sebi_items[:6],
         "media_context": media,
+        "media_freshness_window_days": MEDIA_FRESHNESS_DAYS,
+        "stale_or_undated_media_excluded_from_current_context": True,
         "refresh_notes": refresh_notes,
         "high_confidence_media_claim_requires_official_confirmation": True,
         "historical_media_requires_first_seen_at_before_cutoff": True,
@@ -227,6 +262,7 @@ def news_evidence_for_prompt(trade_date: str) -> str:
         "TRADE BRAIN OFFICIAL-FIRST NEWS EVIDENCE (deterministic, point-in-time):",
         "Priority: NSE/BSE official disclosure > SEBI official > archived major media > Yahoo/Alpha Vantage discovery.",
         "Do not label a media-only claim HIGH confidence unless an official source confirms it.",
+        f"Current-media freshness window: {pack.get('media_freshness_window_days', MEDIA_FRESHNESS_DAYS)} calendar days; stale or undated media is excluded from current catalyst context.",
     ]
     for label, key in (
         ("OFFICIAL COMPANY/EXCHANGE", "official_company_events"),
@@ -241,6 +277,8 @@ def news_evidence_for_prompt(trade_date: str) -> str:
             title = _clip(item.get("title"), 180)
             detail = _clip(item.get("detail"), 180)
             lines.append(f"- {date} | {source} | {title}" + (f" | {detail}" if detail else ""))
+    if not pack.get("media_context"):
+        lines.append("Recent media context: unavailable in the deterministic archive; do not promote stale supplementary articles into current catalysts.")
     if pack.get("refresh_notes"):
         lines.append("Refresh notes: " + "; ".join(pack["refresh_notes"]))
     return "\n".join(lines)
