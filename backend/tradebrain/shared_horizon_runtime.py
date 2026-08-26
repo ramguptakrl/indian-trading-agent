@@ -28,6 +28,7 @@ from backend.tradebrain.live_decision_context import (
     decision_context_for_prompt,
 )
 from backend.tradebrain.llm_failover import (
+    capacity_error_summary,
     get_capacity_fallback_config,
     is_retryable_llm_capacity_error,
     public_capacity_error,
@@ -61,6 +62,7 @@ def _capacity_attempt(
 ) -> tuple[Any, dict[str, Any], bool]:
     """Execute primary then one configured capacity fallback, if appropriate."""
     active_config = dict(config)
+    primary_provider = str(active_config.get("llm_provider") or "primary").lower()
     try:
         return execute(active_config), active_config, False
     except Exception as primary_error:
@@ -73,16 +75,21 @@ def _capacity_attempt(
                 public_capacity_error(primary_error, fallback_available=False)
             ) from primary_error
 
+        fallback_provider = str(fallback_config.get("llm_provider") or "alternate").lower()
         try:
             return execute(fallback_config), fallback_config, True
         except Exception as fallback_error:
             if is_retryable_llm_capacity_error(fallback_error):
                 raise RuntimeError(
-                    public_capacity_error(fallback_error, fallback_available=True)
+                    "AI_UNAVAILABLE / WAIT: "
+                    f"{primary_provider.upper()} hit {capacity_error_summary(primary_error)}; "
+                    f"alternate {fallback_provider.upper()} also hit "
+                    f"{capacity_error_summary(fallback_error)}. Trade Brain remains WAIT / "
+                    "NO TRADE. This is provider capacity, not a trading-signal failure."
                 ) from fallback_error
             raise RuntimeError(
-                "Automatic alternate-provider attempt could not complete the analysis: "
-                f"{str(fallback_error)[:500]}"
+                f"Automatic alternate-provider {fallback_provider.upper()} attempt could not "
+                f"complete the analysis: {str(fallback_error)[:500]}"
             ) from fallback_error
 
 
@@ -149,17 +156,18 @@ def build_shared_research_pack(
     pack_id: str | None = None,
     on_report: Callable[[str, str], None] | None = None,
 ) -> dict[str, Any]:
-    """Run common BSE analyst research exactly once and freeze the resulting pack.
+    """Run common BSE analyst research once, checkpointed analyst-by-analyst.
 
-    If a selected analyst genuinely returns no report, retry only that analyst once using
-    the same audited context and normal provider-capacity failover. We never silently drop a
-    required analyst and never publish a trade decision from an incomplete shared pack.
+    Market, News, Fundamentals (and optional Social) are independent checkpoints. If provider
+    capacity fails during one analyst, only that analyst is retried on the configured alternate
+    provider; already-completed analyst work is never re-run merely because a later analyst hit
+    quota. A genuinely blank report gets one targeted retry for that analyst only.
     """
     if not selected_analysts:
         raise ValueError("At least one analyst is required for shared BSE research")
 
     # Deterministic audited market context is built once here and injected unchanged into
-    # both downstream horizon states. This prevents duplicate DB/context construction.
+    # every shared analyst and both downstream horizon states.
     context = build_bse_decision_context(trade_date)
     context_prompt = decision_context_for_prompt(context)
 
@@ -167,63 +175,80 @@ def build_shared_research_pack(
     shared_config["graph_mode"] = GRAPH_MODE_SHARED_RESEARCH_ONLY
     shared_config.pop("requested_trade_mode", None)
 
-    def execute(current_config: dict[str, Any]) -> dict[str, Any]:
-        return _run_shared_analyst_graph(
-            ticker=ticker,
-            trade_date=trade_date,
-            context_prompt=context_prompt,
-            config=current_config,
-            selected_analysts=list(selected_analysts),
-            on_report=on_report,
-        )
-
-    run_result, active_config, failover_used = _capacity_attempt(shared_config, execute)
-    reports = {
-        field: str(run_result["reports"].get(field) or "").strip()
-        for field in SHARED_REPORT_FIELDS
-    }
-
-    # A blank report can occur if an analyst finishes its tool loop but the final model
-    # response contains no narrative. Retry only the missing analyst instead of re-running
-    # all completed shared research and burning provider quota again.
-    missing = missing_required_reports(selected_analysts, reports)
+    reports = {field: "" for field in SHARED_REPORT_FIELDS}
+    active_config = dict(shared_config)
+    failover_used = False
     targeted_retries: list[str] = []
-    for field in list(missing):
-        analyst = analyst_for_report(field)
-        if analyst is None:
-            continue
-        targeted_retries.append(analyst)
+    analyst_provider_trace: list[dict[str, Any]] = []
 
-        def repair_execute(
+    for analyst_name in selected_analysts:
+        def execute_one(
             current_config: dict[str, Any],
-            analyst_name: str = analyst,
+            selected_name: str = analyst_name,
         ) -> dict[str, Any]:
             return _run_shared_analyst_graph(
                 ticker=ticker,
                 trade_date=trade_date,
                 context_prompt=context_prompt,
                 config=current_config,
-                selected_analysts=[analyst_name],
+                selected_analysts=[selected_name],
                 on_report=on_report,
             )
 
-        repair_result, repair_config, repair_failover = _capacity_attempt(
+        analyst_result, analyst_config, analyst_failover = _capacity_attempt(
             active_config,
-            repair_execute,
+            execute_one,
         )
-        failover_used = bool(failover_used or repair_failover)
-        active_config = repair_config
-        for report_field, value in repair_result["reports"].items():
+        failover_used = bool(failover_used or analyst_failover)
+        active_config = analyst_config
+        analyst_provider_trace.append({
+            "analyst": analyst_name,
+            "provider": str(active_config.get("llm_provider") or "unknown").lower(),
+            "failover_used": bool(analyst_failover),
+        })
+
+        for report_field, value in analyst_result["reports"].items():
             text = str(value or "").strip()
             if text:
                 reports[report_field] = text
+
+        # A blank report can occur if the analyst finishes its tool loop but returns no
+        # narrative. Retry exactly this analyst once; never restart previously completed work.
+        missing_for_analyst = missing_required_reports([analyst_name], reports)
+        if missing_for_analyst:
+            targeted_retries.append(analyst_name)
+            repair_result, repair_config, repair_failover = _capacity_attempt(
+                active_config,
+                execute_one,
+            )
+            failover_used = bool(failover_used or repair_failover)
+            active_config = repair_config
+            analyst_provider_trace.append({
+                "analyst": analyst_name,
+                "provider": str(active_config.get("llm_provider") or "unknown").lower(),
+                "failover_used": bool(repair_failover),
+                "targeted_retry": True,
+            })
+            for report_field, value in repair_result["reports"].items():
+                text = str(value or "").strip()
+                if text:
+                    reports[report_field] = text
+
+        still_missing = missing_required_reports([analyst_name], reports)
+        if still_missing:
+            pretty = analyst_name.replace("_", " ").title()
+            raise RuntimeError(
+                "Shared BSE research incomplete after targeted retry: "
+                f"{pretty} returned no usable report. Completed earlier analyst reports were "
+                "preserved, but no INTRADAY or SWING trade decision was published."
+            )
 
     missing = missing_required_reports(selected_analysts, reports)
     if missing:
         owners = [analyst_for_report(field) or field for field in missing]
         pretty = ", ".join(name.replace("_", " ").title() for name in owners)
         raise RuntimeError(
-            "Shared BSE research incomplete after targeted retry: "
+            "Shared BSE research incomplete after analyst checkpoints: "
             f"{pretty} returned no usable report. No INTRADAY or SWING trade decision "
             "was published."
         )
@@ -238,6 +263,7 @@ def build_shared_research_pack(
         "analysts": list(selected_analysts),
         "reports": reports,
         "targeted_analyst_retries": targeted_retries,
+        "analyst_provider_trace": analyst_provider_trace,
         "multi_timeframe_context": context_prompt,
         "context_status": context.get("status"),
         "context_as_of": context.get("as_of"),
@@ -386,6 +412,7 @@ def run_horizon_from_shared_pack(
             "llm_failover_used": shared_pack["llm_failover_used"],
             "context_as_of": shared_pack["context_as_of"],
             "targeted_analyst_retries": shared_pack.get("targeted_analyst_retries", []),
+            "analyst_provider_trace": shared_pack.get("analyst_provider_trace", []),
         }
 
         if material_verifier.get("status") not in {
@@ -446,6 +473,7 @@ def run_horizon_from_shared_pack(
             "shared_context_as_of": shared_pack["context_as_of"],
             "shared_context_status": shared_pack["context_status"],
             "shared_targeted_analyst_retries": shared_pack.get("targeted_analyst_retries", []),
+            "shared_analyst_provider_trace": shared_pack.get("analyst_provider_trace", []),
             "material_verifier": material_verifier,
             "market_report": shared_pack["reports"].get("market_report"),
             "sentiment_report": shared_pack["reports"].get("sentiment_report"),
