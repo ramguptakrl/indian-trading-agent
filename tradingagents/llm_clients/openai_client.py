@@ -15,19 +15,16 @@ from .validators import validate_model
 
 
 class NormalizedChatOpenAI(ChatOpenAI):
-    """ChatOpenAI with normalized output and Trade Brain Groq capacity pacing.
+    """ChatOpenAI with normalized output and Trade Brain Groq free-tier pacing.
 
-    The Responses API returns content as a list of typed blocks (reasoning, text, etc.).
-    This normalizes to string for consistent downstream handling.
-
-    For Groq, the wrapper cooperatively paces agent calls and handles short provider
-    Retry-After windows locally. A temporary tokens-per-minute 429 therefore pauses the
-    current node instead of restarting the entire multi-agent graph on Gemini.
+    Successful Groq calls reconcile the governor's estimate with actual provider token usage.
+    Capacity-rejected reservations are released, and Retry-After/reset timing is imposed
+    process-wide so another agent cannot immediately stampede the same exhausted window.
     """
 
     tradebrain_provider: str = "openai"
-    tradebrain_groq_retry_attempts: int = 3
-    tradebrain_groq_max_retry_wait_seconds: float = 75.0
+    tradebrain_groq_retry_attempts: int = 4
+    tradebrain_groq_max_retry_wait_seconds: float = 90.0
 
     def invoke(self, input, config=None, **kwargs):
         provider = str(self.tradebrain_provider or "").lower()
@@ -36,19 +33,25 @@ class NormalizedChatOpenAI(ChatOpenAI):
 
         attempt = 0
         while True:
-            GLOBAL_GROQ_GOVERNOR.reserve(input)
+            reservation = GLOBAL_GROQ_GOVERNOR.reserve(input)
             try:
-                return normalize_content(super().invoke(input, config, **kwargs))
+                response = super().invoke(input, config, **kwargs)
+                GLOBAL_GROQ_GOVERNOR.reconcile(reservation, response)
+                return normalize_content(response)
             except Exception as exc:
+                # A rejected capacity request did not produce a usable completion; do not
+                # count its full estimated output against our local rolling token budget.
+                GLOBAL_GROQ_GOVERNOR.release(reservation)
                 if not is_retryable_llm_capacity_error(exc):
                     raise
                 if attempt >= int(self.tradebrain_groq_retry_attempts):
                     raise
 
                 delay = retry_after_seconds(exc)
-                # Long reset windows usually indicate a daily/model quota rather than the
-                # minute window. Let the outer Trade Brain fallback move to Gemini instead
-                # of sleeping for minutes/hours inside one agent node.
+                GLOBAL_GROQ_GOVERNOR.impose_cooldown(delay + 0.25)
+                # A free-tier minute-window reset is normally <=60 s. Much longer reset
+                # windows are likely daily/model quota exhaustion, where Gemini fallback is
+                # preferable to blocking an analyst for many minutes.
                 if delay > float(self.tradebrain_groq_max_retry_wait_seconds):
                     raise
 
@@ -58,7 +61,7 @@ class NormalizedChatOpenAI(ChatOpenAI):
 
 # Kwargs forwarded from user config to ChatOpenAI
 _PASSTHROUGH_KWARGS = (
-    "timeout", "max_retries", "reasoning_effort",
+    "timeout", "max_retries", "reasoning_effort", "max_tokens",
     "api_key", "callbacks", "http_client", "http_async_client",
 )
 
@@ -74,12 +77,15 @@ _PROVIDER_CONFIG = {
 }
 
 
-class OpenAIClient(BaseLLMClient):
-    """Client for OpenAI and OpenAI-compatible providers.
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
 
-    Native OpenAI models use the Responses API. Third-party compatible providers
-    such as Groq, xAI, OpenRouter and Ollama use standard Chat Completions.
-    """
+
+class OpenAIClient(BaseLLMClient):
+    """Client for OpenAI and OpenAI-compatible providers."""
 
     def __init__(
         self,
@@ -96,13 +102,10 @@ class OpenAIClient(BaseLLMClient):
         self.warn_if_unknown_model()
         llm_kwargs = {
             "model": self.model,
-            # Keep provider hiccups from failing a whole graph immediately, while
-            # remaining bounded so Trade Brain can still move to its alternate provider.
             "timeout": 60,
             "max_retries": 2,
         }
 
-        # Provider-specific base URL and auth
         if self.provider in _PROVIDER_CONFIG:
             base_url, api_key_env = _PROVIDER_CONFIG[self.provider]
             llm_kwargs["base_url"] = base_url
@@ -115,19 +118,19 @@ class OpenAIClient(BaseLLMClient):
         elif self.base_url:
             llm_kwargs["base_url"] = self.base_url
 
-        # Groq retries are handled by our rate governor so Retry-After/reset hints are
-        # respected explicitly. Disable opaque SDK retries that would otherwise duplicate
-        # calls before Trade Brain has a chance to pace them.
         if self.provider == "groq":
+            # Groq Free gpt-oss-20b is constrained by an 8K TPM window. Keep each agent's
+            # narrative bounded; the process governor handles the aggregate rolling budget.
             llm_kwargs["max_retries"] = 0
+            llm_kwargs["max_tokens"] = max(
+                256,
+                min(_env_int("TRADEBRAIN_GROQ_MAX_COMPLETION_TOKENS", 1200), 2000),
+            )
 
-        # Forward user-provided kwargs; explicit config overrides safe defaults.
         for key in _PASSTHROUGH_KWARGS:
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 
-        # Native OpenAI: use Responses API for consistent behavior across
-        # all model families. Third-party providers use Chat Completions.
         if self.provider == "openai":
             llm_kwargs["use_responses_api"] = True
 
