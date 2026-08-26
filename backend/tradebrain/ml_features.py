@@ -63,7 +63,7 @@ def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
     avg_gain = _wilder(gain, period)
     avg_loss = _wilder(loss, period)
     rs = avg_gain / avg_loss.replace(0.0, np.nan)
-    out = 100.0 - 100.0 / (1.0 + rs)
+    out = 100.0 - (100.0 / (1.0 + rs))
     flat = (avg_gain.fillna(0.0) == 0.0) & (avg_loss.fillna(0.0) == 0.0)
     out = out.mask(flat, 50.0)
     out = out.mask((avg_loss == 0.0) & (avg_gain > 0.0), 100.0)
@@ -523,6 +523,8 @@ def build_point_in_time_features(
         "trade_authorization": False,
         "order_execution_allowed": False,
     }
-    frame.insert(0, "series_id", series_id)
-    frame.insert(1, "interval", interval)
+    frame["series_id"] = series_id
+    frame["interval"] = interval
+    ordered = ["series_id", "interval"] + [c for c in frame.columns if c not in {"series_id", "interval"}]
+    frame = frame.loc[:, ordered]
     return FeatureBundle(frame=frame, feature_columns=features, metadata=metadata)
