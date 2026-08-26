@@ -23,6 +23,21 @@ import { NextStep } from "@/components/NextStep";
 import { PositionSizeCalculator } from "@/components/PositionSizeCalculator";
 
 const BSE_TICKER = "BSE";
+const SHARED_REPORT_BY_ANALYST: Record<string, string> = {
+  market: "market_report",
+  social: "sentiment_report",
+  news: "news_report",
+  fundamentals: "fundamentals_report",
+};
+const SHARED_REPORT_KEYS = Object.values(SHARED_REPORT_BY_ANALYST);
+const DECISION_REPORT_KEYS = ["investment_plan", "trader_investment_plan", "final_trade_decision"];
+
+function pickReports(reports: Record<string, string>, keys: string[]) {
+  return keys.reduce<Record<string, string>>((selected, key) => {
+    if (reports[key]) selected[key] = reports[key];
+    return selected;
+  }, {});
+}
 
 function HorizonSummary({
   plan,
@@ -89,24 +104,94 @@ function HorizonSummary({
   );
 }
 
+function SharedResearchTrail({
+  intraday,
+  swing,
+  selectedAnalysts,
+}: {
+  intraday: HorizonPlanState;
+  swing: HorizonPlanState;
+  selectedAnalysts: string[];
+}) {
+  if (intraday.status === "idle" && swing.status === "idle") return null;
+
+  const sourceReports = Object.keys(intraday.reports).length ? intraday.reports : swing.reports;
+  const sharedReports = pickReports(sourceReports, SHARED_REPORT_KEYS);
+  const sharedComplete = selectedAnalysts.every((analyst) => {
+    const key = SHARED_REPORT_BY_ANALYST[analyst];
+    return !key || Boolean(sharedReports[key]);
+  });
+  const sharedStatus = sharedComplete ? "completed" : "running";
+
+  return (
+    <Card>
+      <CardContent className="p-5 space-y-5">
+        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold">Shared BSE research</h3>
+              <Badge variant="outline">PULLED ONCE</Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Market, social, news and fundamentals research is gathered once into one audited BSE evidence pack, then reused unchanged by both horizon decision pipelines.
+            </p>
+          </div>
+          <p className="text-[11px] text-muted-foreground max-w-md">
+            Same evidence does not mean same verdict: INTRADAY and SWING · MTF still run separate Bull/Bear research, Trader, risk debate and Portfolio Manager decisions.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <div className="lg:col-span-1">
+            <AgentProgress
+              reports={sharedReports}
+              signal={null}
+              status={sharedStatus}
+              pipeline="shared"
+              selectedAnalysts={selectedAnalysts}
+            />
+          </div>
+          <div className="lg:col-span-3">
+            <ReportPanel reports={sharedReports} />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function HorizonResearchTrail({ plan, title }: { plan: HorizonPlanState; title: string }) {
   if (plan.status === "idle") return null;
+
+  const decisionReports = pickReports(plan.reports, DECISION_REPORT_KEYS);
+  const progressReports = {
+    ...decisionReports,
+    bull_history: plan.debates.bull,
+    bear_history: plan.debates.bear,
+    risk_aggressive_history: plan.riskDebates.aggressive,
+    risk_conservative_history: plan.riskDebates.conservative,
+    risk_neutral_history: plan.riskDebates.neutral,
+  };
 
   return (
     <Card>
       <CardContent className="p-5 space-y-5">
         <div>
-          <h3 className="font-semibold">{title} research trail</h3>
+          <h3 className="font-semibold">{title} decision trail</h3>
           <p className="text-xs text-muted-foreground">
-            Independent agent evidence and debate for this horizon only.
+            Independent horizon reasoning using the shared analyst evidence above. Bull/Bear debate, Research Manager, Trader, risk debate and Portfolio Manager remain separate for this horizon.
           </p>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <div className="lg:col-span-1">
-            <AgentProgress reports={plan.reports} signal={plan.signal} status={plan.status} />
+            <AgentProgress
+              reports={progressReports}
+              signal={plan.signal}
+              status={plan.status}
+              pipeline="decision"
+            />
           </div>
           <div className="lg:col-span-3 space-y-4">
-            <ReportPanel reports={plan.reports} />
+            <ReportPanel reports={decisionReports} />
             <DebateView
               bull={plan.debates.bull}
               bear={plan.debates.bear}
@@ -168,7 +253,7 @@ export default function AnalysisPage() {
             <Badge variant="outline">NSE:BSE</Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Two independent BSE analyses run together: INTRADAY and SWING · MTF. Neither horizon may substitute for the other.
+            One shared BSE research pass feeds two independent decisions: INTRADAY and SWING · MTF. Neither horizon may substitute for the other.
           </p>
         </div>
         <div className="flex gap-2">
@@ -219,7 +304,7 @@ export default function AnalysisPage() {
               {running ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Analyzing both horizons...
+                  Research once · decide twice...
                 </>
               ) : (
                 <>
@@ -258,6 +343,12 @@ export default function AnalysisPage() {
           <CardContent className="p-4 text-red-700">{analysis.error}</CardContent>
         </Card>
       )}
+
+      <SharedResearchTrail
+        intraday={intraday}
+        swing={swing}
+        selectedAnalysts={selectedAnalysts}
+      />
 
       {hasRun && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
