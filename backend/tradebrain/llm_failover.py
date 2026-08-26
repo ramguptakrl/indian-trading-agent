@@ -3,7 +3,7 @@
 This module is credential-blind: it only checks whether alternate provider credentials
 exist in the local process environment. It never returns, logs, or persists API keys.
 
-It also provides a small process-wide Groq capacity governor. The governor is advisory
+It also provides a process-wide Groq free-tier capacity governor. The governor is advisory
 capacity control only: it never changes trading policy or broker permissions.
 """
 
@@ -87,29 +87,83 @@ def retry_after_seconds(exc: BaseException, *, default: float = 20.0) -> float:
     return max(0.0, default)
 
 
+def response_total_tokens(response: Any) -> int | None:
+    """Extract actual provider token usage from common LangChain AIMessage metadata."""
+    usage = getattr(response, "usage_metadata", None)
+    if isinstance(usage, dict):
+        for key in ("total_tokens", "total_token_count"):
+            try:
+                value = int(usage.get(key) or 0)
+            except (TypeError, ValueError):
+                value = 0
+            if value > 0:
+                return value
+        try:
+            input_tokens = int(usage.get("input_tokens") or 0)
+            output_tokens = int(usage.get("output_tokens") or 0)
+        except (TypeError, ValueError):
+            input_tokens = output_tokens = 0
+        if input_tokens + output_tokens > 0:
+            return input_tokens + output_tokens
+
+    metadata = getattr(response, "response_metadata", None)
+    if isinstance(metadata, dict):
+        candidates = [metadata.get("token_usage"), metadata.get("usage")]
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            for key in ("total_tokens", "total_token_count"):
+                try:
+                    value = int(candidate.get(key) or 0)
+                except (TypeError, ValueError):
+                    value = 0
+                if value > 0:
+                    return value
+            try:
+                prompt = int(candidate.get("prompt_tokens") or candidate.get("input_tokens") or 0)
+                completion = int(candidate.get("completion_tokens") or candidate.get("output_tokens") or 0)
+            except (TypeError, ValueError):
+                prompt = completion = 0
+            if prompt + completion > 0:
+                return prompt + completion
+    return None
+
+
 class GroqFreeTierGovernor:
-    """Cooperatively pace Groq calls under a rolling soft token-per-minute budget."""
+    """Cooperatively pace Groq calls under a rolling soft token-per-minute budget.
+
+    Reservations are estimated before a request, then reconciled to actual provider usage
+    after success. Capacity-rejected requests are released so a 429 does not poison the
+    local budget by being counted as if it consumed a full completion.
+    """
 
     def __init__(
         self,
         *,
-        tpm_budget: int = 7600,
+        tpm_budget: int = 6200,
         window_seconds: float = 60.0,
-        output_reserve: int = 1200,
-        min_request_interval: float = 1.0,
+        output_reserve: int = 1500,
+        min_request_interval: float = 1.25,
     ) -> None:
         self.tpm_budget = max(1000, int(tpm_budget))
         self.window_seconds = max(1.0, float(window_seconds))
         self.output_reserve = max(0, int(output_reserve))
         self.min_request_interval = max(0.0, float(min_request_interval))
-        self._events: deque[tuple[float, int]] = deque()
+        self._events: deque[tuple[float, int, int]] = deque()
         self._last_request_at: float | None = None
+        self._blocked_until: float = 0.0
+        self._next_reservation_id = 1
         self._lock = threading.Lock()
 
     def _estimate(self, request: Any) -> int:
-        # Dependency-free conservative estimate; provider 429 remains authoritative.
-        estimated = math.ceil(len(str(request)) / 4.0) + self.output_reserve
+        # Dependency-free conservative estimate. Actual usage is reconciled after success.
+        estimated = math.ceil(len(str(request)) / 3.5) + self.output_reserve
         return min(max(1, estimated), max(1, self.tpm_budget - 200))
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - self.window_seconds
+        while self._events and self._events[0][0] <= cutoff:
+            self._events.popleft()
 
     def reserve(self, request: Any) -> dict[str, Any]:
         requested = self._estimate(request)
@@ -118,18 +172,20 @@ class GroqFreeTierGovernor:
             wait_for = 0.0
             with self._lock:
                 now = time.monotonic()
-                cutoff = now - self.window_seconds
-                while self._events and self._events[0][0] <= cutoff:
-                    self._events.popleft()
-                used = sum(tokens for _, tokens in self._events)
+                self._prune(now)
+                used = sum(tokens for _, tokens, _ in self._events)
+                wait_for = max(wait_for, self._blocked_until - now)
                 if self._last_request_at is not None:
                     wait_for = max(wait_for, self.min_request_interval - (now - self._last_request_at))
                 if used + requested > self.tpm_budget and self._events:
-                    wait_for = max(wait_for, self._events[0][0] + self.window_seconds - now + 0.05)
+                    wait_for = max(wait_for, self._events[0][0] + self.window_seconds - now + 0.10)
                 if wait_for <= 0:
-                    self._events.append((now, requested))
+                    reservation_id = self._next_reservation_id
+                    self._next_reservation_id += 1
+                    self._events.append((now, requested, reservation_id))
                     self._last_request_at = now
                     return {
+                        "reservation_id": reservation_id,
                         "estimated_tokens": requested,
                         "waited_seconds": round(waited, 3),
                         "soft_tpm_budget": self.tpm_budget,
@@ -138,10 +194,50 @@ class GroqFreeTierGovernor:
             time.sleep(sleep_for)
             waited += sleep_for
 
+    def reconcile(self, reservation: dict[str, Any] | int | None, response: Any) -> int | None:
+        """Replace an estimate with actual provider usage when metadata is available."""
+        rid = reservation.get("reservation_id") if isinstance(reservation, dict) else reservation
+        actual = response_total_tokens(response)
+        if not rid or not actual:
+            return actual
+        actual = max(1, int(actual))
+        with self._lock:
+            for index, (timestamp, _tokens, event_id) in enumerate(self._events):
+                if event_id == int(rid):
+                    self._events[index] = (timestamp, actual, event_id)
+                    break
+        return actual
+
+    def release(self, reservation: dict[str, Any] | int | None) -> None:
+        """Release a provider-rejected reservation that did not complete."""
+        rid = reservation.get("reservation_id") if isinstance(reservation, dict) else reservation
+        if not rid:
+            return
+        with self._lock:
+            self._events = deque(event for event in self._events if event[2] != int(rid))
+
+    def impose_cooldown(self, seconds: float) -> None:
+        """Apply provider reset timing process-wide so other agents do not stampede Groq."""
+        delay = max(0.0, float(seconds))
+        with self._lock:
+            self._blocked_until = max(self._blocked_until, time.monotonic() + delay)
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            now = time.monotonic()
+            self._prune(now)
+            return {
+                "soft_tpm_budget": self.tpm_budget,
+                "rolling_tokens": sum(tokens for _, tokens, _ in self._events),
+                "reservations": len(self._events),
+                "cooldown_remaining_seconds": round(max(0.0, self._blocked_until - now), 3),
+            }
+
     def reset(self) -> None:
         with self._lock:
             self._events.clear()
             self._last_request_at = None
+            self._blocked_until = 0.0
 
 
 def _env_float(name: str, default: float) -> float:
@@ -157,19 +253,14 @@ def groq_governor_enabled() -> bool:
 
 
 GLOBAL_GROQ_GOVERNOR = GroqFreeTierGovernor(
-    tpm_budget=int(_env_float("TRADEBRAIN_GROQ_SOFT_TPM", 7600)),
-    output_reserve=int(_env_float("TRADEBRAIN_GROQ_OUTPUT_RESERVE", 1200)),
-    min_request_interval=_env_float("TRADEBRAIN_GROQ_MIN_INTERVAL_SECONDS", 1.0),
+    tpm_budget=int(_env_float("TRADEBRAIN_GROQ_SOFT_TPM", 6200)),
+    output_reserve=int(_env_float("TRADEBRAIN_GROQ_OUTPUT_RESERVE", 1500)),
+    min_request_interval=_env_float("TRADEBRAIN_GROQ_MIN_INTERVAL_SECONDS", 1.25),
 )
 
 
 def get_capacity_fallback_config(config: dict[str, Any]) -> dict[str, Any] | None:
-    """Return one alternate provider config for a retryable capacity failure.
-
-    Normal BSE architecture is Groq primary + Gemini verifier. Capacity failover remains
-    symmetric so a user who explicitly selected Google can still fall back to Groq.
-    Protected Trade Brain policy fields are copied unchanged.
-    """
+    """Return one alternate provider config for a retryable capacity failure."""
     provider = str(config.get("llm_provider") or "").strip().lower()
     fallback = dict(config)
 
@@ -190,11 +281,7 @@ def get_capacity_fallback_config(config: dict[str, Any]) -> dict[str, Any] | Non
 
 
 def get_material_verifier_config(config: dict[str, Any]) -> dict[str, Any] | None:
-    """Return Gemini verifier metadata when Groq is primary and Google is configured.
-
-    The analysis runtime may use this only for material findings; it must not call the
-    verifier for every market tick. The returned object contains no credential.
-    """
+    """Return Gemini verifier metadata when Groq is primary and Google is configured."""
     provider = str(config.get("llm_provider") or "").strip().lower()
     if provider != "groq" or not (os.getenv("GOOGLE_API_KEY") or "").strip():
         return None
