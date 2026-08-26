@@ -57,9 +57,10 @@ compatibility/audit.
 
 ## Canonical AI roles
 
-- **Groq** is the normal primary research/synthesis provider when configured.
-- **Gemini** is the independent material-finding verifier/challenger when configured.
-- retryable capacity/quota failover is supported between configured providers.
+- **OpenAI paid API** is the normal development/production reasoning path when configured.
+- Recommended OpenAI routing is `gpt-5.6-luna` for high-volume/quick work and `gpt-5.6-terra` for deeper synthesis.
+- **Gemini** remains the independent material-finding verifier/challenger and retryable-capacity fallback when configured.
+- **Groq** may remain configured as an optional alternate provider; it is no longer required as the primary development path.
 - AI never grants broker, session, risk or funding permission.
 
 ## Conversion status — completed
@@ -218,15 +219,24 @@ Useful benchmark dimensions include:
 - hard-rule/session violations;
 - latency and provider cost/resilience.
 
-## Remaining work is operational, not conversion architecture
+## v0.14 ML extension boundary
+
+The v0.13 BSE conversion is complete. v0.14 ML/self-training is an additive research subsystem, not a reopening of the product boundary.
+
+The canonical frozen implementation specification is `TRADEBRAIN_ML_SELF_TRAINING_PLAN.md`, restored from `checkpoint/tradebrain-ml-plan-2026-08-26`.
+
+ML may learn feature/model weights, probability thresholds and approved research parameters only through chronological validation, challenger governance and human-approved promotion. It may never weaken BSE scope, session, provenance, broker/MTF funding, halt, risk, advisory-only or no-order-execution rules.
+
+## Remaining operational validation
 
 Before real advisory use:
 
-1. configure local Groq/Gemini credentials;
-2. authenticate local Kite market data;
-3. launch the Windows software;
-4. verify real BSE history/quote/WebSocket and optional NIFTY context locally;
-5. run the first real dual-horizon advisory with execution OFF;
-6. continue untouched prospective evidence collection.
+1. configure/test the local paid OpenAI key and confirm Luna/Terra routing;
+2. keep Gemini configured as verifier/fallback and Groq only as an optional alternate;
+3. authenticate local paid Kite market data;
+4. launch the Windows software;
+5. verify real BSE history/quote/WebSocket and optional NIFTY context locally;
+6. run the first real dual-horizon advisory with execution OFF;
+7. continue untouched prospective evidence collection and v0.14 ML shadow validation.
 
 PR #1 remains **OPEN / DRAFT / UNMERGED** until the owner explicitly asks otherwise.
