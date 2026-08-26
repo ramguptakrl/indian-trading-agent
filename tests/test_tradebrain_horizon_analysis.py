@@ -3,7 +3,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.routers import analysis_horizons
+from backend.routers.analysis import _tasks
 from backend.routers.analysis_horizons import HorizonAnalysisRequest
+from backend.tradebrain.trade_date import normalize_trade_date
 from tradingagents.horizon_policy import horizon_instruction
 
 
@@ -34,32 +36,63 @@ class TradeBrainHorizonAnalysisTests(unittest.TestCase):
             self.assertNotIn("MTF disabled", source)
             self.assertNotIn("funded with the trader's own cash", source)
 
-    def test_run_horizon_pair_launches_two_independent_modes_with_serial_provider_load(self):
-        calls = []
+    def test_run_horizon_pair_registers_one_shared_pack_and_two_decision_tasks(self):
+        req = HorizonAnalysisRequest(ticker="BSE", trade_date="2026-08-25")
+        created_ids = []
 
-        def fake_launch(req, mode, *, wait_for_task_id=None):
-            calls.append((mode, wait_for_task_id))
-            return f"task-{mode.lower()}"
+        with patch.object(analysis_horizons.threading, "Thread") as thread_cls:
+            result = analysis_horizons.run_horizon_pair(req)
+            thread_cls.return_value.start.assert_called_once()
 
-        with patch.object(analysis_horizons, "_launch", side_effect=fake_launch):
-            result = analysis_horizons.run_horizon_pair(
-                HorizonAnalysisRequest(ticker="BSE", trade_date="2026-08-25")
+        try:
+            intraday_id = result["tasks"]["INTRADAY"]
+            swing_id = result["tasks"]["SWING"]
+            created_ids.extend([intraday_id, swing_id])
+            self.assertNotEqual(intraday_id, swing_id)
+            self.assertEqual(
+                _tasks[intraday_id]["shared_research_pack_id"],
+                _tasks[swing_id]["shared_research_pack_id"],
             )
+            self.assertEqual(
+                result["shared_research_pack_id"],
+                _tasks[intraday_id]["shared_research_pack_id"],
+            )
+            self.assertTrue(result["shared_data_pull"])
+            self.assertTrue(result["shared_analyst_research"])
+            self.assertTrue(result["independent_decision_graph_runs"])
+            self.assertFalse(result["shared_final_decision"])
+            self.assertFalse(result["horizon_substitution_allowed"])
+            self.assertEqual(
+                result["provider_load_scheduling"],
+                "SHARED_RESEARCH_ONCE_THEN_SERIAL_DECISIONS",
+            )
+            self.assertEqual(result["swing_funding"], "ZERODHA_MTF_ONLY")
+            self.assertFalse(result["order_execution_allowed"])
+        finally:
+            for task_id in created_ids:
+                _tasks.pop(task_id, None)
 
-        self.assertEqual(
-            calls,
-            [("INTRADAY", None), ("SWING", "task-intraday")],
+    def test_graph_setup_has_shared_research_and_forked_decision_modes(self):
+        root = Path(__file__).resolve().parents[1]
+        setup_source = (root / "tradingagents/graph/setup.py").read_text(encoding="utf-8")
+        self.assertIn('GRAPH_MODE_SHARED_RESEARCH_ONLY = "SHARED_RESEARCH_ONLY"', setup_source)
+        self.assertIn(
+            'GRAPH_MODE_DECISION_FROM_SHARED_RESEARCH = "DECISION_FROM_SHARED_RESEARCH"',
+            setup_source,
         )
-        self.assertEqual(
-            result["tasks"],
-            {"INTRADAY": "task-intraday", "SWING": "task-swing"},
+        self.assertIn('workflow.add_edge(START, "Bull Researcher")', setup_source)
+        self.assertIn("workflow.add_edge(current_clear, END)", setup_source)
+
+    def test_offset_midnight_trade_date_is_canonicalized(self):
+        request = HorizonAnalysisRequest(
+            ticker="BSE",
+            trade_date="2026-08-26T00:00:00+05:30",
         )
-        self.assertTrue(result["independent_graph_runs"])
-        self.assertFalse(result["shared_final_decision"])
-        self.assertFalse(result["horizon_substitution_allowed"])
-        self.assertEqual(result["provider_load_scheduling"], "SERIALIZED_INDEPENDENT_HORIZONS")
-        self.assertEqual(result["swing_funding"], "ZERODHA_MTF_ONLY")
-        self.assertFalse(result["order_execution_allowed"])
+        self.assertEqual(request.trade_date, "2026-08-26")
+        self.assertEqual(
+            normalize_trade_date("2026-08-26T00:00:00+05:30"),
+            "2026-08-26",
+        )
 
     def test_non_bse_target_is_rejected(self):
         with self.assertRaises(Exception) as ctx:
