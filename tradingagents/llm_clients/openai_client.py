@@ -17,9 +17,10 @@ from .validators import validate_model
 class NormalizedChatOpenAI(ChatOpenAI):
     """ChatOpenAI with normalized output and Trade Brain Groq free-tier pacing.
 
-    Successful Groq calls reconcile the governor's estimate with actual provider token usage.
-    Capacity-rejected reservations are released, and Retry-After/reset timing is imposed
-    process-wide so another agent cannot immediately stampede the same exhausted window.
+    Successful Groq calls reconcile the governor's estimate with actual provider token usage
+    and observe Groq's live rate-limit headers. Capacity-rejected reservations are released,
+    and Retry-After/reset timing is imposed process-wide so another agent cannot stampede the
+    same exhausted window.
     """
 
     tradebrain_provider: str = "openai"
@@ -36,9 +37,12 @@ class NormalizedChatOpenAI(ChatOpenAI):
             reservation = GLOBAL_GROQ_GOVERNOR.reserve(input)
             try:
                 response = super().invoke(input, config, **kwargs)
+                GLOBAL_GROQ_GOVERNOR.observe_response(response)
                 GLOBAL_GROQ_GOVERNOR.reconcile(reservation, response)
                 return normalize_content(response)
             except Exception as exc:
+                # Read any 429/reset headers before deciding whether to wait or fail over.
+                GLOBAL_GROQ_GOVERNOR.observe_error(exc)
                 # A rejected capacity request did not produce a usable completion; do not
                 # count its full estimated output against our local rolling token budget.
                 GLOBAL_GROQ_GOVERNOR.release(reservation)
@@ -120,13 +124,14 @@ class OpenAIClient(BaseLLMClient):
 
         if self.provider == "groq":
             # Each agent needs a concise decision-quality report, not a multi-thousand-token
-            # essay. The lower default materially reduces both TPM pressure and the 200K/day
-            # free-tier token burn while leaving room for structured reasoning and levels.
+            # essay. The lower default materially reduces both TPM pressure and daily burn.
             llm_kwargs["max_retries"] = 0
             llm_kwargs["max_tokens"] = max(
                 256,
                 min(_env_int("TRADEBRAIN_GROQ_MAX_COMPLETION_TOKENS", 800), 1600),
             )
+            # LangChain otherwise discards the headers Groq gives us for exact live limits.
+            llm_kwargs["include_response_headers"] = True
 
         # Forward caller overrides last; explicit config overrides safe defaults.
         for key in _PASSTHROUGH_KWARGS:
