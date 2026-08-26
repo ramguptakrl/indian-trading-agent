@@ -119,12 +119,13 @@ class OpenAIClient(BaseLLMClient):
             llm_kwargs["base_url"] = self.base_url
 
         if self.provider == "groq":
-            # Groq Free gpt-oss-20b is constrained by an 8K TPM window. Keep each agent's
-            # narrative bounded; the process governor handles the aggregate rolling budget.
+            # Each agent needs a concise decision-quality report, not a multi-thousand-token
+            # essay. The lower default materially reduces both TPM pressure and the 200K/day
+            # free-tier token burn while leaving room for structured reasoning and levels.
             llm_kwargs["max_retries"] = 0
             llm_kwargs["max_tokens"] = max(
                 256,
-                min(_env_int("TRADEBRAIN_GROQ_MAX_COMPLETION_TOKENS", 1200), 2000),
+                min(_env_int("TRADEBRAIN_GROQ_MAX_COMPLETION_TOKENS", 800), 1600),
             )
 
         # Forward caller overrides last; explicit config overrides safe defaults.
