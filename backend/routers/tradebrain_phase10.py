@@ -11,6 +11,7 @@ from backend.tradebrain.advisory_pipeline import parse_agent_candidate
 from backend.tradebrain.advisory_store import get_final_advisory
 from backend.tradebrain.audit_txt import audit_final_advisory
 from backend.tradebrain.live_advisory import evaluate_live_guarded_advisory
+from backend.tradebrain.signal_lifecycle import apply_signal_lifecycle, get_current_signal
 
 router = APIRouter(prefix="/api/tradebrain", tags=["tradebrain-phase10"])
 
@@ -63,6 +64,7 @@ def phase10_doctrine():
             "SWING_MTF_ONLY_FUNDING_GATE",
             "HUMAN_APPROVED_SOFT_RUNTIME",
             "RESIDENT_PLUS_MTF_NET_COST_SCENARIOS",
+            "STICKY_SIGNAL_PUBLICATION_LIFECYCLE",
             "ADVISORY_ONLY_OUTPUT",
         ],
         "live_guard_priority": "HALT > PRICE RANGE > DATA QUALITY/FREAK TICK > BROKER/FUNDING > TECHNICAL SETUP > LLM",
@@ -77,6 +79,16 @@ def phase10_doctrine():
         "swing_funding": "MTF_ONLY",
         "cnc_own_cash_active_swing_allowed": False,
         "active_modes": ["INTRADAY", "SWING"],
+        "signal_publication": {
+            "analysis_can_refresh_frequently": True,
+            "publication_is_event_driven": True,
+            "fixed_trade_count_limit": False,
+            "same_direction_refresh_reaffirms_active_plan": True,
+            "single_refresh_direction_flip_suppressed": True,
+            "opposite_direction_requires_consecutive_publishable_confirmation": True,
+            "intraday_plan_expires_across_session_date_boundary": True,
+            "swing_plan_sticky_across_dates": True,
+        },
         "human_readable_txt_audit": True,
         "hidden_chain_of_thought_persisted": False,
     }
@@ -98,11 +110,31 @@ def phase10_final_advisory(data: FinalAdvisoryRequest):
         }
         market_inputs = {key: payload.pop(key) for key in market_keys}
         result = evaluate_live_guarded_advisory(**payload, **market_inputs)
+        result = apply_signal_lifecycle(
+            result,
+            final_trade_decision=data.final_trade_decision,
+            evaluated_at=data.evaluated_at,
+        )
         request_audit = data.model_dump(exclude={"final_trade_decision"})
         audit_final_advisory(result, request=request_audit)
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/phase10/signal-lifecycle/{horizon}")
+def phase10_signal_lifecycle(horizon: Literal["INTRADAY", "SWING"]):
+    current = get_current_signal(horizon)
+    return {
+        "ticker": "BSE",
+        "horizon": horizon,
+        "active_plan": current,
+        "fixed_trade_count_limit": False,
+        "analysis_can_refresh_frequently": True,
+        "publication_is_event_driven": True,
+        "trade_authorization": False,
+        "order_execution_allowed": False,
+    }
 
 
 @router.get("/phase10/analysis/{task_id}")
@@ -135,6 +167,10 @@ def phase10_acceptance_boundary():
         "crash_guard_must_be_explicit": True,
         "broker_permission_must_be_explicit": True,
         "soft_parameter_runtime_requires_human_approved_active_version": True,
+        "signal_publication_is_sticky": True,
+        "fixed_trade_count_limit": False,
+        "same_direction_refresh_creates_duplicate_trade": False,
+        "single_refresh_direction_flip_allowed": False,
         "human_readable_txt_audit": True,
         "hidden_chain_of_thought_persisted": False,
     }
