@@ -13,6 +13,7 @@ from backend.tradebrain.llm_failover import (
     groq_governor_enabled,
     is_retryable_llm_capacity_error,
     public_capacity_error,
+    response_rate_limit_headers,
     response_total_tokens,
     retry_after_seconds,
 )
@@ -77,6 +78,34 @@ class TradeBrainLLMFailoverTests(unittest.TestCase):
         )
         self.assertEqual(response_total_tokens(response), 2500)
 
+    def test_response_rate_headers_are_normalized(self):
+        response = SimpleNamespace(
+            response_metadata={
+                "headers": {
+                    "X-RateLimit-Limit-Tokens": "8000",
+                    "X-RateLimit-Remaining-Tokens": "6200",
+                }
+            }
+        )
+        headers = response_rate_limit_headers(response)
+        self.assertEqual(headers["x-ratelimit-limit-tokens"], "8000")
+        self.assertEqual(headers["x-ratelimit-remaining-tokens"], "6200")
+
+    def test_governor_observes_live_provider_limit_headers(self):
+        governor = GroqFreeTierGovernor(tpm_budget=6200, output_reserve=1000, min_request_interval=0)
+        snapshot = governor.observe_headers({
+            "x-ratelimit-limit-tokens": "6000",
+            "x-ratelimit-remaining-tokens": "2400",
+            "x-ratelimit-remaining-requests": "777",
+            "x-ratelimit-reset-tokens": "4.5s",
+        })
+        self.assertEqual(snapshot["provider_limit_tokens_per_minute"], 6000)
+        self.assertEqual(snapshot["provider_remaining_tokens"], 2400)
+        self.assertEqual(snapshot["provider_remaining_requests_per_day"], 777)
+        self.assertGreater(snapshot["provider_token_reset_seconds"], 0)
+        # 78% adaptive headroom is lower than the configured 6200 ceiling.
+        self.assertEqual(snapshot["soft_tpm_budget"], 4680)
+
     def test_governor_reconciles_estimate_to_actual_usage(self):
         governor = GroqFreeTierGovernor(tpm_budget=6200, output_reserve=1500, min_request_interval=0)
         reservation = governor.reserve("tiny")
@@ -131,6 +160,7 @@ class TradeBrainLLMFailoverTests(unittest.TestCase):
         assert fallback is not None
         self.assertEqual(fallback["llm_provider"], "google")
         self.assertEqual(fallback["deep_think_llm"], "gemini-3.6-flash")
+        self.assertEqual(fallback["google_thinking_level"], "minimal")
         self.assertTrue(fallback["advisory_only"])
 
     def test_no_key_means_no_automatic_fallback(self):
