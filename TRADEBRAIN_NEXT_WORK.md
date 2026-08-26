@@ -15,18 +15,40 @@ This is the active short-list for work remaining on the BSE Ltd Trade Brain bran
 
 ## AI provider reliability / cost safety
 
-- [ ] Validate a paid-capacity primary provider for full Deep/validation workloads while Groq Developer upgrades are unavailable.
-- [ ] Preserve shared analyst checkpoints so completed Market / News / Fundamentals work is never rerun solely because a later provider call fails.
-- [ ] Keep per-analyst automatic provider failover and expose provider-specific capacity diagnostics without secrets.
-- [ ] Read actual provider rate-limit/remaining/reset metadata where available instead of relying only on hard-coded free-tier assumptions.
-- [ ] Add generous runaway API circuit breakers that allow normal Deep runs but stop accidental graph/provider loops before abnormal spend.
+- [x] Select a paid-capacity development path while Groq Developer upgrades are unavailable: **OpenAI paid API**.
+- [x] Configure recommended OpenAI model choices in code/settings: **gpt-5.6-luna quick** + **gpt-5.6-terra deep**.
+- [x] Add retryable-capacity failover from OpenAI primary to configured **Gemini 3.6 Flash**.
+- [x] Allow Gemini to remain the independent material verifier when OpenAI is primary.
+- [x] Preserve shared analyst checkpoints so completed Market / News / Fundamentals work is not rerun solely because a later provider call fails.
+- [x] Read actual Groq provider rate-limit/remaining/reset metadata where available instead of relying only on hard-coded free-tier assumptions.
+- [ ] Locally save and test the newly-created OpenAI API key through **Settings > Models & Keys**; never commit the key.
+- [ ] Set OpenAI as the local default after the key test passes; retain Gemini and Groq as configured alternates where available.
+- [ ] Finish/validate generous runaway API circuit breakers that allow normal Deep runs but stop accidental graph/provider loops before abnormal spend.
 - [ ] Record actual per-run calls, input/output tokens, provider/model and estimated cost for development comparison.
+
+## UI / user experience
+
+- [x] Simplify the BSE Analysis page so Shared Evidence, INTRADAY and SWING · MTF are immediately readable.
+- [x] Collapse raw agent reasoning/diagnostics instead of showing every report/debate by default.
+- [x] Separate INTRADAY and SWING rows in Analysis Outcomes/History.
+- [x] Clean stale inherited API-cost/provider guidance from Settings.
+- [ ] Remove normal-user reasoning-depth selection after adaptive depth is implemented.
 
 ## Validation
 
-- [ ] Prove Shallow/normal production analysis end-to-end on Windows.
-- [ ] Prove full Deep validation analysis end-to-end without rate-limit failure.
+- [ ] Pull the current branch into `D:\TradeBrain-Current` and confirm the refreshed Settings UI locally.
+- [ ] Save/test OpenAI key locally and confirm `gpt-5.6-luna` + `gpt-5.6-terra` are selected.
+- [ ] Prove Shallow/normal production analysis end-to-end on Windows using OpenAI primary.
+- [ ] Prove OpenAI -> Gemini capacity failover with a controlled test; do not intentionally burn quota.
+- [ ] Prove full Deep validation analysis end-to-end without provider-limit failure.
 - [ ] Compare decisions and token/cost usage across reasoning depths; do not expose multiple competing live verdicts to the normal user.
 - [ ] Continue prospective BSE evidence collection and leakage-safe historical/walk-forward testing.
 
-All Trade Brain analysis remains advisory-only with broker order execution OFF.
+## Product invariants
+
+- BSE Ltd / NSE:BSE remains the only trade target.
+- INTRADAY = LONG/SHORT, same-session only.
+- SWING = LONG only, Zerodha MTF-funded only.
+- Kite remains market-data-only; no broker order mutation route is enabled.
+- AI cannot override deterministic scope, session, provenance, broker/funding, halt or safety gates.
+- All Trade Brain analysis remains advisory-only with broker order execution OFF.
