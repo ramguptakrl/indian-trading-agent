@@ -15,6 +15,13 @@ const sharedAgents: Agent[] = [
   { name: "Fundamentals Analyst", status: "pending" },
 ];
 
+const sharedAgentKey: Record<string, string> = {
+  "Market Analyst": "market",
+  "Social Analyst": "social",
+  "News Analyst": "news",
+  "Fundamentals Analyst": "fundamentals",
+};
+
 const decisionAgents: Agent[] = [
   { name: "Bull Researcher", status: "pending" },
   { name: "Bear Researcher", status: "pending" },
@@ -31,11 +38,21 @@ interface Props {
   signal: string | null;
   status: string;
   pipeline?: "full" | "shared" | "decision";
+  selectedAnalysts?: string[];
 }
 
-export function AgentProgress({ reports, signal: _signal, status, pipeline = "full" }: Props) {
+export function AgentProgress({
+  reports,
+  signal: _signal,
+  status,
+  pipeline = "full",
+  selectedAnalysts,
+}: Props) {
+  const visibleSharedAgents = selectedAnalysts?.length
+    ? sharedAgents.filter((agent) => selectedAnalysts.includes(sharedAgentKey[agent.name]))
+    : sharedAgents;
   const baseAgents = pipeline === "shared"
-    ? sharedAgents
+    ? visibleSharedAgents
     : pipeline === "decision"
       ? decisionAgents
       : defaultAgents;
