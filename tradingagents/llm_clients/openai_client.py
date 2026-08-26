@@ -127,6 +127,7 @@ class OpenAIClient(BaseLLMClient):
                 min(_env_int("TRADEBRAIN_GROQ_MAX_COMPLETION_TOKENS", 1200), 2000),
             )
 
+        # Forward caller overrides last; explicit config overrides safe defaults.
         for key in _PASSTHROUGH_KWARGS:
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
