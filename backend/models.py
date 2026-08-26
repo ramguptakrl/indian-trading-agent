@@ -6,6 +6,7 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 
 from backend.tradebrain.bse_scope import require_bse_trade_target
+from backend.tradebrain.trade_date import normalize_trade_date
 
 
 class AnalysisRequest(BaseModel):
@@ -26,6 +27,11 @@ class AnalysisRequest(BaseModel):
     @classmethod
     def enforce_bse_scope(cls, value: str) -> str:
         return require_bse_trade_target(value)
+
+    @field_validator("trade_date", mode="before")
+    @classmethod
+    def canonicalize_trade_date(cls, value: object) -> str:
+        return normalize_trade_date(value)
 
 
 class AnalysisResponse(BaseModel):
