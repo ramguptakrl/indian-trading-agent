@@ -1,22 +1,59 @@
 import os
+import time
 from typing import Any, Optional
 
 from langchain_openai import ChatOpenAI
 
+from backend.tradebrain.llm_failover import (
+    GLOBAL_GROQ_GOVERNOR,
+    groq_governor_enabled,
+    is_retryable_llm_capacity_error,
+    retry_after_seconds,
+)
 from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
 
 
 class NormalizedChatOpenAI(ChatOpenAI):
-    """ChatOpenAI with normalized content output.
+    """ChatOpenAI with normalized output and Trade Brain Groq capacity pacing.
 
-    The Responses API returns content as a list of typed blocks
-    (reasoning, text, etc.). This normalizes to string for consistent
-    downstream handling.
+    The Responses API returns content as a list of typed blocks (reasoning, text, etc.).
+    This normalizes to string for consistent downstream handling.
+
+    For Groq, the wrapper cooperatively paces agent calls and handles short provider
+    Retry-After windows locally. A temporary tokens-per-minute 429 therefore pauses the
+    current node instead of restarting the entire multi-agent graph on Gemini.
     """
 
+    tradebrain_provider: str = "openai"
+    tradebrain_groq_retry_attempts: int = 3
+    tradebrain_groq_max_retry_wait_seconds: float = 75.0
+
     def invoke(self, input, config=None, **kwargs):
-        return normalize_content(super().invoke(input, config, **kwargs))
+        provider = str(self.tradebrain_provider or "").lower()
+        if provider != "groq" or not groq_governor_enabled():
+            return normalize_content(super().invoke(input, config, **kwargs))
+
+        attempt = 0
+        while True:
+            GLOBAL_GROQ_GOVERNOR.reserve(input)
+            try:
+                return normalize_content(super().invoke(input, config, **kwargs))
+            except Exception as exc:
+                if not is_retryable_llm_capacity_error(exc):
+                    raise
+                if attempt >= int(self.tradebrain_groq_retry_attempts):
+                    raise
+
+                delay = retry_after_seconds(exc)
+                # Long reset windows usually indicate a daily/model quota rather than the
+                # minute window. Let the outer Trade Brain fallback move to Gemini instead
+                # of sleeping for minutes/hours inside one agent node.
+                if delay > float(self.tradebrain_groq_max_retry_wait_seconds):
+                    raise
+
+                attempt += 1
+                time.sleep(max(0.25, delay + 0.25))
 
 
 # Kwargs forwarded from user config to ChatOpenAI
@@ -78,6 +115,12 @@ class OpenAIClient(BaseLLMClient):
         elif self.base_url:
             llm_kwargs["base_url"] = self.base_url
 
+        # Groq retries are handled by our rate governor so Retry-After/reset hints are
+        # respected explicitly. Disable opaque SDK retries that would otherwise duplicate
+        # calls before Trade Brain has a chance to pace them.
+        if self.provider == "groq":
+            llm_kwargs["max_retries"] = 0
+
         # Forward user-provided kwargs; explicit config overrides safe defaults.
         for key in _PASSTHROUGH_KWARGS:
             if key in self.kwargs:
@@ -88,7 +131,10 @@ class OpenAIClient(BaseLLMClient):
         if self.provider == "openai":
             llm_kwargs["use_responses_api"] = True
 
-        return NormalizedChatOpenAI(**llm_kwargs)
+        return NormalizedChatOpenAI(
+            tradebrain_provider=self.provider,
+            **llm_kwargs,
+        )
 
     def validate_model(self) -> bool:
         """Validate model for the provider."""
