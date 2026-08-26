@@ -52,8 +52,34 @@ class TradeBrainNewsEvidenceTests(unittest.TestCase):
         self.assertEqual(pack["official_company_events"][0]["source_tier"], "OFFICIAL_EXCHANGE")
         self.assertEqual(pack["media_context"][0]["source_tier"], "MEDIA_CONTEXT")
         self.assertFalse(pack["media_context"][0]["official_fact"])
+        self.assertEqual(pack["media_context"][0]["freshness_status"], "RECENT")
         self.assertTrue(pack["high_confidence_media_claim_requires_official_confirmation"])
+        self.assertEqual(pack["media_freshness_window_days"], 30)
         self.assertEqual(pack["official_sebi_context"], [])
+
+    @patch("backend.tradebrain.news_evidence._is_today_ist", return_value=False)
+    @patch("backend.tradebrain.news_evidence.query_news_known_by")
+    @patch("backend.tradebrain.news_evidence.list_events", return_value=[])
+    def test_old_article_newly_seen_is_not_current_news(self, _events, query_news, _today):
+        query_news.return_value = [
+            {
+                "source": "GuruFocus (via yfinance)",
+                "source_type": "yfinance",
+                "title": "BSE Ltd Q3 earnings call highlights",
+                "summary": "Old earnings article rediscovered later",
+                "url": "https://example.com/old-story",
+                "published_at_source": "2026-02-09 10:00",
+                "first_seen_at": "2026-08-26T05:00:00+00:00",
+                "relevance": "BSE_DIRECT",
+            }
+        ]
+
+        pack = build_bse_news_evidence("2026-08-26")
+        self.assertEqual(pack["media_context"], [])
+        self.assertTrue(pack["stale_or_undated_media_excluded_from_current_context"])
+        prompt = news_evidence_for_prompt("2026-08-26")
+        self.assertIn("Recent media context: unavailable", prompt)
+        self.assertNotIn("Q3 earnings call highlights", prompt)
 
     @patch("backend.tradebrain.news_evidence._is_today_ist", return_value=True)
     @patch("backend.tradebrain.news_evidence.archive_current_bse_context_news")
@@ -99,11 +125,13 @@ class TradeBrainNewsEvidenceTests(unittest.TestCase):
                 "title": "Media context",
                 "detail": "Interpretation",
             }],
+            "media_freshness_window_days": 30,
             "refresh_notes": [],
         }
         prompt = news_evidence_for_prompt("2026-08-26")
         self.assertIn("NSE/BSE official disclosure > SEBI official > archived major media", prompt)
         self.assertIn("Do not label a media-only claim HIGH confidence", prompt)
+        self.assertIn("30 calendar days", prompt)
         self.assertIn("MoneyControl", prompt)
 
 
