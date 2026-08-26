@@ -46,11 +46,26 @@ def _clean(value: str) -> str:
 
 
 def _field(text: str, aliases: tuple[str, ...]) -> str | None:
+    """Read an explicitly labelled field without inferring from narrative prose.
+
+    Portfolio models sometimes render a numbered field as either `Label: value` or as
+    `1. Label` followed by the value on the next line. Both remain strict labelled-field
+    formats, so accepting the second form improves robustness without permitting free-form
+    trade inference.
+    """
+    source = text or ""
     for alias in aliases:
-        pattern = re.compile(
+        inline = re.compile(
             rf"(?im)^\s*(?:[-*]\s*)?(?:\d+[.)]\s*)?(?:\*\*)?{re.escape(alias)}(?:\*\*)?\s*:\s*(.+?)\s*$"
         )
-        match = pattern.search(text or "")
+        match = inline.search(source)
+        if match:
+            return _clean(match.group(1))
+
+        next_line = re.compile(
+            rf"(?im)^\s*(?:[-*]\s*)?(?:\d+[.)]\s*)?(?:\*\*)?{re.escape(alias)}(?:\*\*)?\s*:?[ \t]*$\r?\n[ \t]*(?!\d+[.)][ \t])(.+?)[ \t]*$"
+        )
+        match = next_line.search(source)
         if match:
             return _clean(match.group(1))
     return None
@@ -98,7 +113,7 @@ def parse_agent_candidate(text: str) -> dict[str, Any]:
         "stop_loss": _price(raw["stop_loss"]),
         "take_profit": _price(raw["take_profit"]),
         "raw_fields": raw,
-        "parser": "STRICT_LABELLED_FIELDS_V1",
+        "parser": "STRICT_LABELLED_FIELDS_V2",
         "free_form_inference_used": False,
     }
 
