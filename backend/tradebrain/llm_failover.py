@@ -212,7 +212,6 @@ class GroqFreeTierGovernor:
         self._lock = threading.Lock()
 
     def _estimate(self, request: Any) -> int:
-        # Dependency-free conservative estimate. Actual usage is reconciled after success.
         estimated = math.ceil(len(str(request)) / 3.5) + self.output_reserve
         return min(max(1, estimated), max(1, self.tpm_budget - 200))
 
@@ -241,7 +240,6 @@ class GroqFreeTierGovernor:
             self._prune(now)
             if hard_tpm and hard_tpm > 0:
                 self._provider_limit_tokens = hard_tpm
-                # Preserve at least ~22% headroom and never exceed the configured local cap.
                 observed_soft = max(1000, int(hard_tpm * 0.78))
                 self.tpm_budget = min(self._configured_tpm_budget, observed_soft)
             if remaining_tokens is not None:
@@ -376,24 +374,50 @@ GLOBAL_GROQ_GOVERNOR = GroqFreeTierGovernor(
 )
 
 
-def get_capacity_fallback_config(config: dict[str, Any]) -> dict[str, Any] | None:
-    """Return one alternate provider config for a retryable capacity failure."""
-    provider = str(config.get("llm_provider") or "").strip().lower()
+def _google_fallback(config: dict[str, Any]) -> dict[str, Any]:
     fallback = dict(config)
+    fallback["llm_provider"] = "google"
+    fallback["deep_think_llm"] = "gemini-3.6-flash"
+    fallback["quick_think_llm"] = "gemini-3.6-flash"
+    fallback["google_thinking_level"] = (
+        os.getenv("TRADEBRAIN_GEMINI_FALLBACK_THINKING_LEVEL", "minimal").strip()
+        or None
+    )
+    return fallback
 
-    if provider == "groq" and (os.getenv("GOOGLE_API_KEY") or "").strip():
-        fallback["llm_provider"] = "google"
-        fallback["deep_think_llm"] = "gemini-3.6-flash"
-        fallback["quick_think_llm"] = "gemini-3.6-flash"
-        # Fallback exists to finish a blocked analysis, not to spend tens of thousands of
-        # thinking tokens. Gemini 3.6 Flash supports minimal thinking for this purpose.
-        fallback["google_thinking_level"] = (
-            os.getenv("TRADEBRAIN_GEMINI_FALLBACK_THINKING_LEVEL", "minimal").strip()
-            or None
-        )
-        return fallback
 
-    if provider == "google" and (os.getenv("GROQ_API_KEY") or "").strip():
+def _openai_fallback(config: dict[str, Any]) -> dict[str, Any]:
+    fallback = dict(config)
+    fallback["llm_provider"] = "openai"
+    fallback["deep_think_llm"] = "gpt-5.6-terra"
+    fallback["quick_think_llm"] = "gpt-5.6-luna"
+    fallback["google_thinking_level"] = None
+    return fallback
+
+
+def get_capacity_fallback_config(config: dict[str, Any]) -> dict[str, Any] | None:
+    """Return one deterministic alternate-provider config for a retryable capacity failure.
+
+    Preferred order for the paid-development setup is OpenAI primary -> Gemini fallback.
+    When Google is primary, a configured OpenAI key is preferred over the constrained Groq
+    free tier. Groq primary still uses Gemini first so existing installations remain compatible.
+    """
+    provider = str(config.get("llm_provider") or "").strip().lower()
+    google_ready = bool((os.getenv("GOOGLE_API_KEY") or "").strip())
+    openai_ready = bool((os.getenv("OPENAI_API_KEY") or "").strip())
+    groq_ready = bool((os.getenv("GROQ_API_KEY") or "").strip())
+
+    if provider == "openai" and google_ready:
+        return _google_fallback(config)
+
+    if provider == "groq" and google_ready:
+        return _google_fallback(config)
+
+    if provider == "google" and openai_ready:
+        return _openai_fallback(config)
+
+    if provider == "google" and groq_ready:
+        fallback = dict(config)
         fallback["llm_provider"] = "groq"
         fallback["deep_think_llm"] = "openai/gpt-oss-20b"
         fallback["quick_think_llm"] = "openai/gpt-oss-20b"
@@ -404,9 +428,9 @@ def get_capacity_fallback_config(config: dict[str, Any]) -> dict[str, Any] | Non
 
 
 def get_material_verifier_config(config: dict[str, Any]) -> dict[str, Any] | None:
-    """Return Gemini verifier metadata when Groq is primary and Google is configured."""
+    """Return Gemini verifier metadata when a non-Google primary and Google are configured."""
     provider = str(config.get("llm_provider") or "").strip().lower()
-    if provider != "groq" or not (os.getenv("GOOGLE_API_KEY") or "").strip():
+    if provider == "google" or not (os.getenv("GOOGLE_API_KEY") or "").strip():
         return None
     return {
         "provider": "google",
