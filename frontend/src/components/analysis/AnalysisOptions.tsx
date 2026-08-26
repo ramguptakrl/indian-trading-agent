@@ -27,9 +27,9 @@ const availableAnalysts = [
 ];
 
 const depthOptions = [
-  { value: 1, label: "Shallow", description: "1 debate round · lowest model usage" },
-  { value: 2, label: "Medium", description: "2 debate rounds · more model calls" },
-  { value: 3, label: "Deep", description: "3 debate rounds · highest model usage" },
+  { value: 1, label: "Shallow", description: "1 debate round · recommended · lowest model usage" },
+  { value: 2, label: "Medium", description: "2 debate rounds · roughly doubles debate calls" },
+  { value: 3, label: "Deep", description: "3 debate rounds · benchmark mode · highest quota use" },
 ];
 
 const languages = [
@@ -70,6 +70,7 @@ export function AnalysisOptions({
           <Badge variant="outline" className="text-xs">
             {analysts.length} agents · Depth {depth} · {language}
           </Badge>
+          {depth === 1 && <Badge variant="secondary" className="text-[10px]">RECOMMENDED</Badge>}
         </div>
         {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
       </button>
@@ -127,14 +128,23 @@ export function AnalysisOptions({
                       : "border-border hover:border-primary/30"
                   }`}
                 >
-                  <span className="text-sm font-medium">{d.label}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{d.label}</span>
+                    {d.value === 1 && <Badge variant="secondary" className="text-[9px]">NORMAL USE</Badge>}
+                  </div>
                   <p className="text-[10px] text-muted-foreground mt-1">{d.description}</p>
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">
-              Trade Brain does not display guessed rupee/API costs; actual provider usage is reported after a completed run.
-            </p>
+            {depth > 1 ? (
+              <p className="text-[10px] text-amber-700 mt-2">
+                Higher depth repeats both investment and risk debates for each horizon. On free API tiers this can consume quota quickly; use Shallow for normal live analysis.
+              </p>
+            ) : (
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Shallow still runs the full analyst → Bull/Bear → Research Manager → Trader → Risk → Portfolio Manager chain; it only limits repeated debate rounds.
+              </p>
+            )}
           </div>
 
           <div>
