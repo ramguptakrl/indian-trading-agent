@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from backend.tradebrain.ml_drift import feature_drift_report
 from backend.tradebrain.ml_features import FeatureBundle
 from backend.tradebrain.ml_models import MODEL_FAMILIES, default_model_specs
 from backend.tradebrain.ml_optimizer import OptimizerConfig, optimize_labeled_dataset
@@ -153,6 +155,41 @@ class MLOptimizerSafetyTests(unittest.TestCase):
             self.assertFalse(evidence["advisory_weight_applied"])
             self.assertFalse(evidence["trade_authorization"])
             self.assertFalse(evidence["order_execution_allowed"])
+
+    def test_feature_drift_alert_is_observational_only(self):
+        result = self._optimize()
+        with tempfile.TemporaryDirectory() as tmp:
+            metadata = register_optimization(result, code_version="unit-test", root=tmp)
+            shifted = self._bundle()
+            shifted.frame.loc[:, "return_1"] = shifted.frame["return_1"] + 8.0
+            report = feature_drift_report(
+                metadata["model_id"],
+                shifted,
+                registry_root=tmp,
+                recent_rows=100,
+            )
+            self.assertEqual(report["status"], "DRIFT_ALERT")
+            self.assertFalse(report["automatic_policy_change"])
+            self.assertFalse(report["trade_authorization"])
+            self.assertFalse(report["order_execution_allowed"])
+
+    def test_ml_operator_scripts_compile_and_keep_execution_disabled(self):
+        root = Path(__file__).resolve().parents[1]
+        scripts = (
+            root / "scripts" / "tradebrain_ml_optimizer.py",
+            root / "scripts" / "tradebrain_after_market_study_ml.py",
+        )
+        for script in scripts:
+            source = script.read_text(encoding="utf-8")
+            compile(source, str(script), "exec")
+            self.assertIn("order_execution_allowed", source)
+            self.assertNotIn("place_order(", source)
+            self.assertNotIn("modify_order(", source)
+            self.assertNotIn("cancel_order(", source)
+        study = (root / "Study-TradeBrain.bat").read_text(encoding="utf-8")
+        self.assertIn("tradebrain_after_market_study_ml.py", study)
+        optimizer = (root / "Optimize-TradeBrain-ML.bat").read_text(encoding="utf-8")
+        self.assertIn("tradebrain_ml_optimizer.py", optimizer)
 
     def test_registry_fails_closed_on_tampered_model_payload(self):
         result = self._optimize()

@@ -163,6 +163,7 @@ def register_optimization(
         "oos_stress_15x": result.oos_stress_15x,
         "oos_stress_20x": result.oos_stress_20x,
         "walk_forward": result.walk_forward,
+        "feature_baseline": result.metadata.get("feature_baseline") or {},
         "historical_walk_forward_pass": bool(
             result.status == "OOS_PASS" and _walk_forward_pass(result.walk_forward)
         ),
