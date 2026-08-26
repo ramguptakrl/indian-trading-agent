@@ -123,6 +123,7 @@ jobs:
           "pytest>=8,<10"
           "requests>=2.32"
           "pypdf>=5,<7"
+          "scikit-learn>=1.5,<2"
           "stockstats>=0.6.5"
           "tzdata>=2025.2"
           "websockets>=13"
