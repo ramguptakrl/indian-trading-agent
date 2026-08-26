@@ -41,6 +41,21 @@ function pickReports(reports: Record<string, string>, keys: string[]) {
   }, {});
 }
 
+function sharedResearchState(
+  intraday: HorizonPlanState,
+  swing: HorizonPlanState,
+  selectedAnalysts: string[],
+) {
+  const sourceReports = Object.keys(intraday.reports).length ? intraday.reports : swing.reports;
+  const sharedReports = pickReports(sourceReports, SHARED_REPORT_KEYS);
+  const complete = selectedAnalysts.every((analyst) => {
+    const key = SHARED_REPORT_BY_ANALYST[analyst];
+    return !key || Boolean(sharedReports[key]);
+  });
+  const error = !complete ? (intraday.error || swing.error) : null;
+  return { sharedReports, complete, error };
+}
+
 function SharedResearchSummary({
   intraday,
   swing,
@@ -52,13 +67,11 @@ function SharedResearchSummary({
 }) {
   if (intraday.status === "idle" && swing.status === "idle") return null;
 
-  const sourceReports = Object.keys(intraday.reports).length ? intraday.reports : swing.reports;
-  const sharedReports = pickReports(sourceReports, SHARED_REPORT_KEYS);
-  const sharedComplete = selectedAnalysts.every((analyst) => {
-    const key = SHARED_REPORT_BY_ANALYST[analyst];
-    return !key || Boolean(sharedReports[key]);
-  });
-  const sharedError = intraday.error || swing.error;
+  const { sharedReports, complete: sharedComplete, error: sharedError } = sharedResearchState(
+    intraday,
+    swing,
+    selectedAnalysts,
+  );
   const sharedFailed = !sharedComplete && Boolean(sharedError);
   const sharedStatus = sharedFailed ? "STOPPED" : sharedComplete ? "READY" : "BUILDING";
 
@@ -123,12 +136,17 @@ function HorizonSummary({
   title,
   description,
   step,
+  sharedFailure,
 }: {
   plan: HorizonPlanState;
   title: string;
   description: string;
   step: number;
+  sharedFailure?: string | null;
 }) {
+  const blockedByShared = Boolean(
+    sharedFailure && plan.status === "error" && plan.error === sharedFailure && !plan.signal,
+  );
   const decisionReports = pickReports(plan.reports, DECISION_REPORT_KEYS);
   const hasDebate = Boolean(
     plan.debates.bull ||
@@ -137,7 +155,7 @@ function HorizonSummary({
     plan.riskDebates.conservative ||
     plan.riskDebates.neutral
   );
-  const hasDiagnostics = Boolean(
+  const hasDiagnostics = !blockedByShared && Boolean(
     plan.taskId || plan.stats || Object.keys(decisionReports).length || hasDebate
   );
 
@@ -152,14 +170,20 @@ function HorizonSummary({
             </div>
             <p className="text-xs text-muted-foreground mt-1">{description}</p>
           </div>
-          <Badge variant={plan.status === "error" ? "destructive" : "secondary"}>
-            {plan.status.toUpperCase()}
+          <Badge variant={plan.status === "error" && !blockedByShared ? "destructive" : "secondary"}>
+            {blockedByShared ? "NOT RUN" : plan.status.toUpperCase()}
           </Badge>
         </div>
 
-        {plan.error && (
+        {plan.error && !blockedByShared && (
           <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-700">
             {plan.error}
+          </div>
+        )}
+
+        {blockedByShared && (
+          <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+            Not run — shared evidence was unavailable. See the single error above.
           </div>
         )}
 
@@ -250,6 +274,7 @@ export default function AnalysisPage() {
   const swing = analysis.plans.SWING;
   const running = analysis.status === "running";
   const hasRun = analysis.status !== "idle";
+  const sharedFailure = sharedResearchState(intraday, swing, selectedAnalysts).error;
 
   return (
     <div className="p-6 space-y-4">
@@ -348,12 +373,14 @@ export default function AnalysisPage() {
             step={2}
             title="INTRADAY"
             description="Same-session LONG/SHORT only. After the cutoff, the correct result is NO TRADE."
+            sharedFailure={sharedFailure}
           />
           <HorizonSummary
             plan={swing}
             step={3}
             title="SWING · MTF"
             description="Multi-day LONG only. Missing MTF eligibility/funding stays WAIT / NO TRADE."
+            sharedFailure={sharedFailure}
           />
         </div>
       )}
