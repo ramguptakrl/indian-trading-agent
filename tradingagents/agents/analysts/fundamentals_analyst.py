@@ -28,6 +28,18 @@ activity sensitivity, competitive/market-share context, regulation, new products
 lines and corporate actions. These are analytical categories, not facts to assume: if the
 tools do not provide a datum, mark it unavailable rather than inventing it.
 
+POINT-IN-TIME SAFETY:
+- For a historical analysis date, current vendor snapshot metrics such as today's P/E,
+  market cap, TTM EPS, 52-week statistics or current margins MUST NOT be treated as if they
+  were known on that historical date.
+- The get_fundamentals tool intentionally withholds the present-day snapshot on historical
+  dates. Do not work around that safeguard.
+- For historical analyses, rely on dated balance-sheet, cash-flow and income-statement
+  evidence available at or before the requested cutoff. If a historical valuation metric is
+  not supplied by an archived point-in-time source, mark it unavailable.
+- For the current India date, a current vendor fundamentals snapshot may be used, but label
+  it as current vendor evidence rather than an audited historical observation.
+
 Separate:
 - facts supplied by the tools,
 - interpretation,
