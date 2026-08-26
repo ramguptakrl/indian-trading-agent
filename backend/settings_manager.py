@@ -24,12 +24,28 @@ PROVIDER_ENV_KEYS = {
 }
 
 # Provider display info. This object drives the frontend Models & Keys screen.
+# Dict order is intentional: OpenAI is the current recommended paid development primary.
 PROVIDERS_INFO = {
+    "openai": {
+        "name": "OpenAI",
+        "key_format": "sk-...",
+        "signup_url": "https://platform.openai.com/api-keys",
+        "note": (
+            "Recommended paid Trade Brain primary during development. Use GPT-5.6 Luna for "
+            "high-volume analyst/debate work and GPT-5.6 Terra for deeper decision synthesis. "
+            "Gemini can remain the independent verifier and capacity fallback when configured."
+        ),
+        "models_deep": ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.4"],
+        "models_quick": ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.4-mini"],
+    },
     "google": {
         "name": "Google Gemini",
         "key_format": "AIza...",
         "signup_url": "https://aistudio.google.com/app/apikey",
-        "note": "Trade Brain material-finding verifier/challenger and retryable-capacity fallback when Groq is primary. Keys are saved locally and masked in the UI.",
+        "note": (
+            "Preferred independent verifier/challenger and retryable-capacity fallback when "
+            "another cloud provider is primary. Keys are saved locally and masked in the UI."
+        ),
         "models_deep": [
             "gemini-3.1-pro-preview",
             "gemini-3.6-flash",
@@ -47,7 +63,10 @@ PROVIDERS_INFO = {
         "name": "Groq",
         "key_format": "gsk_...",
         "signup_url": "https://console.groq.com/keys",
-        "note": "Trade Brain primary research/synthesis provider using OpenAI-compatible Groq inference.",
+        "note": (
+            "Fast OpenAI-compatible inference. Keep the free key available as an optional "
+            "capacity fallback; paid Developer access is not required for OpenAI-primary runs."
+        ),
         "models_deep": ["openai/gpt-oss-20b"],
         "models_quick": ["openai/gpt-oss-20b"],
     },
@@ -57,13 +76,6 @@ PROVIDERS_INFO = {
         "signup_url": "https://console.anthropic.com/",
         "models_deep": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-sonnet-4-5"],
         "models_quick": ["claude-sonnet-4-6", "claude-haiku-4-5", "claude-sonnet-4-5"],
-    },
-    "openai": {
-        "name": "OpenAI",
-        "key_format": "sk-...",
-        "signup_url": "https://platform.openai.com/api-keys",
-        "models_deep": ["gpt-5.4", "gpt-5.2", "gpt-5.4-mini"],
-        "models_quick": ["gpt-5.4-mini", "gpt-5.4-nano", "gpt-4.1"],
     },
     "ollama": {
         "name": "Ollama (Local)",
@@ -212,12 +224,16 @@ def test_api_key(provider: str, key: str | None = None) -> dict:
         if provider == "openai":
             from openai import OpenAI
             client = OpenAI(api_key=key)
-            client.chat.completions.create(
-                model="gpt-5.4-mini",
-                max_tokens=10,
-                messages=[{"role": "user", "content": "Say hi"}],
+            client.responses.create(
+                model="gpt-5.6-luna",
+                input="Reply with: ok",
+                max_output_tokens=8,
             )
-            return {"ok": True, "model": "gpt-5.4-mini", "message": "API key works!"}
+            return {
+                "ok": True,
+                "model": "gpt-5.6-luna",
+                "message": "OpenAI API key works with GPT-5.6 Luna!",
+            }
 
         if provider == "google":
             from google import genai
