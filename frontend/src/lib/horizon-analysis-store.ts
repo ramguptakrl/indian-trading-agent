@@ -93,12 +93,19 @@ export const useHorizonAnalysisStore = create<HorizonAnalysisState>((set, get) =
   ) => {
     set((state) => {
       const plans = { ...state.plans, [mode]: updater(state.plans[mode]) };
-      const terminal = Object.values(plans).every(
+      const planValues = Object.values(plans);
+      const terminal = planValues.every(
         (plan) => plan.status === "completed" || plan.status === "error",
       );
+      const anyError = planValues.some((plan) => plan.status === "error");
       return {
         plans,
-        status: state.status === "idle" ? "idle" : terminal ? "completed" : "running",
+        status:
+          state.status === "idle"
+            ? "idle"
+            : terminal
+              ? (anyError ? "error" : "completed")
+              : "running",
       };
     });
   };
@@ -203,8 +210,8 @@ export const useHorizonAnalysisStore = create<HorizonAnalysisState>((set, get) =
         status: "running",
         error: null,
         plans: {
-          INTRADAY: { ...emptyPlan("INTRADAY"), status: "running", heartbeat: "Initializing independent INTRADAY pipeline..." },
-          SWING: { ...emptyPlan("SWING"), status: "running", heartbeat: "Initializing independent SWING · MTF pipeline..." },
+          INTRADAY: { ...emptyPlan("INTRADAY"), status: "running", heartbeat: "Building shared BSE research..." },
+          SWING: { ...emptyPlan("SWING"), status: "running", heartbeat: "Waiting for shared BSE research..." },
         },
       });
 
@@ -222,12 +229,13 @@ export const useHorizonAnalysisStore = create<HorizonAnalysisState>((set, get) =
         attachStream("INTRADAY", result.tasks.INTRADAY);
         attachStream("SWING", result.tasks.SWING);
       } catch (error: any) {
+        const message = error?.message || "Unable to start shared BSE research and horizon analysis.";
         set({
           status: "error",
-          error: error?.message || "Unable to start independent horizon analysis.",
+          error: message,
           plans: {
-            INTRADAY: { ...emptyPlan("INTRADAY"), status: "error", error: error?.message || "Start failed" },
-            SWING: { ...emptyPlan("SWING"), status: "error", error: error?.message || "Start failed" },
+            INTRADAY: { ...emptyPlan("INTRADAY"), status: "error", error: message },
+            SWING: { ...emptyPlan("SWING"), status: "error", error: message },
           },
         });
       }
