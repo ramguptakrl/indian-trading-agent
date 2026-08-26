@@ -113,7 +113,9 @@ class GraphSetup:
                 self.quick_thinking_llm, self.bear_memory
             )
             research_manager_node = create_research_manager(
-                self.deep_thinking_llm, self.invest_judge_memory
+                self.deep_thinking_llm,
+                self.invest_judge_memory,
+                requested_trade_mode=requested_trade_mode,
             )
             trader_node = create_trader(
                 self.quick_thinking_llm,
