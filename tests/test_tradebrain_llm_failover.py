@@ -1,15 +1,19 @@
-"""Regression tests for Deep Analysis LLM capacity failover."""
+"""Regression tests for Deep Analysis LLM capacity failover and Groq pacing."""
 
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from backend.tradebrain.llm_failover import (
+    GroqFreeTierGovernor,
     get_capacity_fallback_config,
+    groq_governor_enabled,
     is_retryable_llm_capacity_error,
     public_capacity_error,
+    retry_after_seconds,
 )
 
 
@@ -28,6 +32,34 @@ class TradeBrainLLMFailoverTests(unittest.TestCase):
 
     def test_programming_error_is_not_retryable(self):
         self.assertFalse(is_retryable_llm_capacity_error(RuntimeError("KeyError: ticker")))
+
+    def test_retry_after_prefers_provider_header(self):
+        error = RuntimeError("429 RateLimitError")
+        error.response = SimpleNamespace(headers={"retry-after": "12.5"})
+        self.assertAlmostEqual(retry_after_seconds(error), 12.5)
+
+    def test_retry_after_parses_groq_token_reset_header(self):
+        error = RuntimeError("429 RateLimitError")
+        error.response = SimpleNamespace(headers={"x-ratelimit-reset-tokens": "1m3.25s"})
+        self.assertAlmostEqual(retry_after_seconds(error), 63.25)
+
+    def test_retry_after_parses_message_hint(self):
+        error = RuntimeError("Rate limit reached. Please try again in 8.75s")
+        self.assertAlmostEqual(retry_after_seconds(error), 8.75)
+
+    def test_groq_governor_is_enabled_by_default_and_can_be_disabled(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TRADEBRAIN_GROQ_GOVERNOR", None)
+            self.assertTrue(groq_governor_enabled())
+            os.environ["TRADEBRAIN_GROQ_GOVERNOR"] = "0"
+            self.assertFalse(groq_governor_enabled())
+
+    def test_governor_uses_headroom_below_hard_tpm(self):
+        governor = GroqFreeTierGovernor(tpm_budget=7600, output_reserve=1200)
+        reservation = governor.reserve("small prompt")
+        self.assertEqual(reservation["soft_tpm_budget"], 7600)
+        self.assertGreaterEqual(reservation["estimated_tokens"], 1200)
+        self.assertLess(reservation["estimated_tokens"], 7600)
 
     def test_google_uses_groq_when_local_key_exists(self):
         config = {
