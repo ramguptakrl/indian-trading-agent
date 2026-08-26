@@ -25,16 +25,24 @@ class TradeBrainHorizonAnalysisTests(unittest.TestCase):
         self.assertIn("Never invent", swing)
         self.assertIn("own-cash/CNC substitute", swing)
 
-    def test_trader_and_manager_share_horizon_policy_source(self):
+    def test_decision_agents_share_horizon_policy_source(self):
         root = Path(__file__).resolve().parents[1]
-        trader_source = (root / "tradingagents/agents/trader/trader.py").read_text(encoding="utf-8")
-        manager_source = (root / "tradingagents/agents/managers/portfolio_manager.py").read_text(encoding="utf-8")
+        sources = [
+            (root / "tradingagents/agents/trader/trader.py").read_text(encoding="utf-8"),
+            (root / "tradingagents/agents/managers/research_manager.py").read_text(encoding="utf-8"),
+            (root / "tradingagents/agents/managers/portfolio_manager.py").read_text(encoding="utf-8"),
+        ]
 
-        for source in (trader_source, manager_source):
+        for source in sources:
             self.assertIn("from tradingagents.horizon_policy import horizon_instruction", source)
             self.assertNotIn("def _horizon_instruction", source)
             self.assertNotIn("MTF disabled", source)
             self.assertNotIn("funded with the trader's own cash", source)
+
+        research_manager = sources[1]
+        self.assertIn("requested_trade_mode: str | None = None", research_manager)
+        self.assertIn("horizon_instruction(requested_trade_mode)", research_manager)
+        self.assertIn("Never substitute SWING for a weak INTRADAY setup", research_manager)
 
     def test_run_horizon_pair_registers_one_shared_pack_and_two_decision_tasks(self):
         req = HorizonAnalysisRequest(ticker="BSE", trade_date="2026-08-25")
@@ -82,6 +90,8 @@ class TradeBrainHorizonAnalysisTests(unittest.TestCase):
         )
         self.assertIn('workflow.add_edge(START, "Bull Researcher")', setup_source)
         self.assertIn("workflow.add_edge(current_clear, END)", setup_source)
+        self.assertIn("create_research_manager(", setup_source)
+        self.assertIn("requested_trade_mode=requested_trade_mode", setup_source)
 
     def test_offset_midnight_trade_date_is_canonicalized(self):
         request = HorizonAnalysisRequest(
