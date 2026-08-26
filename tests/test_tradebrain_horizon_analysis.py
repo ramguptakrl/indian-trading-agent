@@ -80,6 +80,17 @@ class TradeBrainHorizonAnalysisTests(unittest.TestCase):
             for task_id in created_ids:
                 _tasks.pop(task_id, None)
 
+    def test_shared_research_checkpoints_each_analyst_before_fallback(self):
+        root = Path(__file__).resolve().parents[1]
+        runtime_source = (
+            root / "backend/tradebrain/shared_horizon_runtime.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("for analyst_name in selected_analysts:", runtime_source)
+        self.assertIn("selected_analysts=[selected_name]", runtime_source)
+        self.assertIn("analyst_provider_trace", runtime_source)
+        self.assertIn("already-completed analyst work is never re-run", runtime_source)
+
     def test_graph_setup_has_shared_research_and_forked_decision_modes(self):
         root = Path(__file__).resolve().parents[1]
         setup_source = (root / "tradingagents/graph/setup.py").read_text(encoding="utf-8")
