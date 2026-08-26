@@ -13,16 +13,12 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend.routers.analysis import _analysis_advisory, _tasks
 from backend.tradebrain.bse_scope import require_bse_trade_target
-from backend.tradebrain.shared_horizon_runtime import (
-    SHARED_RESEARCH_VERSION,
-    build_shared_research_pack,
-    run_horizon_from_shared_pack,
-)
 from backend.tradebrain.trade_date import normalize_trade_date
 from backend.ws import manager
 from tradingagents.default_config import DEFAULT_CONFIG
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis-horizons"])
+SHARED_RESEARCH_VERSION = "BSE_SHARED_RESEARCH_PACK_V1"
 
 
 class HorizonAnalysisRequest(BaseModel):
@@ -92,6 +88,13 @@ def _run_shared_pair(
     shared_research_pack_id: str,
 ) -> None:
     """Research common evidence once, then run two independent decision graphs."""
+    # Heavy graph/LLM imports stay inside the background worker so API model/unit tests do
+    # not require the full LangChain runtime merely to validate request/architecture code.
+    from backend.tradebrain.shared_horizon_runtime import (
+        build_shared_research_pack,
+        run_horizon_from_shared_pack,
+    )
+
     shared_loop = asyncio.new_event_loop()
     task_ids = (intraday_task_id, swing_task_id)
 
