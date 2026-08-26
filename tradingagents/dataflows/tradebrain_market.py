@@ -18,6 +18,7 @@ from stockstats import wrap
 
 from backend.tradebrain.market_data_store import query_bars
 from backend.tradebrain.market_source_policy import sync_preferred_history
+from backend.tradebrain.trade_date import normalize_trade_date
 from .config import get_config
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -46,7 +47,8 @@ def _identity(symbol: str) -> tuple[str, str]:
 
 
 def _day(value: str) -> date:
-    return datetime.strptime(value, "%Y-%m-%d").date()
+    """Accept either a market date or an ISO datetime emitted by an LLM tool call."""
+    return date.fromisoformat(normalize_trade_date(value))
 
 
 def _rows_for_range(series_id: str, interval: str, start: date, end: date) -> list[tuple[date, dict]]:
@@ -68,22 +70,24 @@ def get_tradebrain_stock_data(symbol: str, start_date: str, end_date: str) -> st
     end = _day(end_date)
     if end <= start:
         raise ValueError("end_date must be after start_date")
+    start_text = start.isoformat()
+    end_text = end.isoformat()
     exchange, ticker = _identity(symbol)
     result = sync_preferred_history(
         exchange=exchange,
         symbol=ticker,
         interval="1d",
-        from_time=f"{start_date}T00:00:00+05:30",
-        to_time=f"{end_date}T23:59:59+05:30",
+        from_time=f"{start_text}T00:00:00+05:30",
+        to_time=f"{end_text}T23:59:59+05:30",
         allow_yahoo_fallback=True,
     )
     series_id = result.get("series_id")
     interval = result.get("interval") or "1d"
     if not series_id:
-        return f"No data found for symbol '{symbol}' between {start_date} and {end_date}"
+        return f"No data found for symbol '{symbol}' between {start_text} and {end_text}"
     selected = _rows_for_range(series_id, interval, start, end)
     if not selected:
-        return f"No data found for symbol '{symbol}' between {start_date} and {end_date}"
+        return f"No data found for symbol '{symbol}' between {start_text} and {end_text}"
 
     out = io.StringIO()
     writer = csv.writer(out)
@@ -101,7 +105,7 @@ def get_tradebrain_stock_data(symbol: str, start_date: str, end_date: str) -> st
     source = result.get("source_key")
     fallback = bool(result.get("fallback_used"))
     header = (
-        f"# Stock data for {exchange}:{ticker} from {start_date} to {end_date}\n"
+        f"# Stock data for {exchange}:{ticker} from {start_text} to {end_text}\n"
         f"# Total records: {len(selected)}\n"
         f"# Trade Brain source: {source}\n"
         f"# Yahoo fallback used: {str(fallback).lower()}\n"
@@ -117,6 +121,7 @@ def get_tradebrain_indicator(symbol: str, indicator: str, curr_date: str, look_b
     if look_back_days <= 0:
         raise ValueError("look_back_days must be positive")
     current = _day(curr_date)
+    current_text = current.isoformat()
     history_start = current - timedelta(days=max(420, look_back_days + 60))
     history_end = current + timedelta(days=1)
     exchange, ticker = _identity(symbol)
@@ -165,7 +170,7 @@ def get_tradebrain_indicator(symbol: str, indicator: str, curr_date: str, look_b
     source = result.get("source_key")
     fallback = bool(result.get("fallback_used"))
     return (
-        f"## {indicator} values from {window_start.isoformat()} to {curr_date}:\n\n"
+        f"## {indicator} values from {window_start.isoformat()} to {current_text}:\n\n"
         + "\n".join(lines)
         + "\n\n"
         + f"Calculated from Trade Brain audited daily OHLCV. Source: {source}. "
