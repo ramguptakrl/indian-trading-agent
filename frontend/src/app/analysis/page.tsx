@@ -121,7 +121,9 @@ function SharedResearchTrail({
     const key = SHARED_REPORT_BY_ANALYST[analyst];
     return !key || Boolean(sharedReports[key]);
   });
-  const sharedStatus = sharedComplete ? "completed" : "running";
+  const sharedFailed = !sharedComplete && (intraday.status === "error" || swing.status === "error");
+  const sharedStatus = sharedFailed ? "error" : sharedComplete ? "completed" : "running";
+  const sharedError = intraday.error || swing.error;
 
   return (
     <Card>
@@ -131,6 +133,7 @@ function SharedResearchTrail({
             <div className="flex items-center gap-2">
               <h3 className="font-semibold">Shared BSE research</h3>
               <Badge variant="outline">PULLED ONCE</Badge>
+              {sharedFailed && <Badge variant="destructive">STOPPED</Badge>}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               Market, social, news and fundamentals research is gathered once into one audited BSE evidence pack, then reused unchanged by both horizon decision pipelines.
@@ -140,6 +143,11 @@ function SharedResearchTrail({
             Same evidence does not mean same verdict: INTRADAY and SWING · MTF still run separate Bull/Bear research, Trader, risk debate and Portfolio Manager decisions.
           </p>
         </div>
+        {sharedFailed && (
+          <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-700">
+            Shared research stopped before completion{sharedError ? `: ${sharedError}` : "."}
+          </div>
+        )}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <div className="lg:col-span-1">
             <AgentProgress
