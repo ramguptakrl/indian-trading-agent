@@ -1,9 +1,17 @@
+import os
 from typing import Any, Optional
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
 
 
 class NormalizedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
@@ -30,12 +38,26 @@ class GoogleClient(BaseLLMClient):
             "model": self.model,
             "timeout": 60,
             "max_retries": 2,
+            # A full dual-horizon run makes many independent agent calls. Keep each Gemini
+            # completion bounded so fallback does not consume a disproportionate share of
+            # free-tier quota or drown the UI in multi-thousand-token narratives.
+            "max_output_tokens": max(
+                256,
+                min(_env_int("TRADEBRAIN_GEMINI_MAX_OUTPUT_TOKENS", 1000), 2000),
+            ),
         }
 
         if self.base_url:
             llm_kwargs["base_url"] = self.base_url
 
-        for key in ("timeout", "max_retries", "callbacks", "http_client", "http_async_client"):
+        for key in (
+            "timeout",
+            "max_retries",
+            "max_output_tokens",
+            "callbacks",
+            "http_client",
+            "http_async_client",
+        ):
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 
