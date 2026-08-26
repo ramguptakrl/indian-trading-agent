@@ -58,6 +58,36 @@ class Phase10FinalAdvisoryTests(unittest.TestCase):
         self.assertEqual(parsed["research_label"], "NO_TRADE")
         self.assertFalse(parsed["free_form_inference_used"])
 
+    def test_numbered_next_line_no_trade_is_safe_non_entry(self):
+        text = """1. Candidate Verdict
+NO TRADE
+2. Trade Mode
+NONE
+3. Direction
+NONE
+4. Entry Price
+N/A
+5. Stop-Loss
+N/A
+6. Take-Profit
+N/A
+"""
+        parsed = parse_agent_candidate(text)
+        self.assertEqual(parsed["parse_status"], "SAFE_NON_ENTRY")
+        self.assertEqual(parsed["candidate_verdict"], "NO TRADE")
+        self.assertEqual(parsed["research_label"], "NO_TRADE")
+        self.assertEqual(parsed["parser"], "STRICT_LABELLED_FIELDS_V2")
+        self.assertFalse(parsed["free_form_inference_used"])
+
+        result = evaluate_final_advisory(
+            ticker="BSE", exchange="NSE", final_trade_decision=text,
+            evaluated_at=datetime(2026, 8, 21, 12, 0, tzinfo=IST),
+            db_path=self.db_path,
+        )
+        self.assertEqual(result["final_status"], "NO_TRADE")
+        self.assertEqual(result["costs"]["status"], "NOT_APPLICABLE_NO_NEW_ENTRY")
+        self.assertFalse(result["trade_authorization"])
+
     def test_processor_never_returns_raw_buy_sell(self):
         processor = SignalProcessor(None)
         label = processor.process_signal(VALID_LONG)
