@@ -45,11 +45,14 @@ class TradeBrainBseScopeTests(unittest.TestCase):
         self.assertNotIn("useAnalysisStore", page)
         self.assertIn("useHorizonAnalysisStore", page)
         self.assertIn("Analyze INTRADAY + SWING", page)
-        self.assertIn("INTRADAY plan", page)
-        self.assertIn("SWING · MTF plan", page)
-        self.assertIn("SWING · ZERODHA MTF", page)
-        self.assertIn("Neither horizon may substitute for the other", page)
-        self.assertIn("Analysis Date", page)
+        self.assertIn('title="INTRADAY"', page)
+        self.assertIn('title="SWING · MTF"', page)
+        self.assertIn("Same-session LONG/SHORT only", page)
+        self.assertIn("Multi-day LONG only", page)
+        self.assertIn("Missing MTF eligibility/funding stays WAIT / NO TRADE", page)
+        self.assertIn("SWING: LONG only · Zerodha MTF", page)
+        self.assertIn("One evidence pack is reused by both horizons", page)
+        self.assertIn("Analysis date", page)
         self.assertIn("India / IST", page)
 
     def test_frontend_dual_horizon_client_uses_paired_backend(self):
@@ -66,8 +69,10 @@ class TradeBrainBseScopeTests(unittest.TestCase):
 
     def test_bse_decision_card_surfaces_structured_price_levels(self):
         card = (ROOT / "frontend" / "src" / "components" / "analysis" / "DecisionCard.tsx").read_text(encoding="utf-8")
-        for label in ("Entry", "Stop-Loss", "Primary Target", "Gross R:R"):
+        for label in ("ENTRY", "STOP", "TARGET", "R:R"):
             self.assertIn(label, card)
+        for field in ("geometry?.entry", "geometry?.stop_loss", "geometry?.take_profit", "gross_reward_risk"):
+            self.assertIn(field, card)
         self.assertIn("Trade Brain will not invent levels", card)
 
     def test_sidebar_hides_generic_ita_discovery_surface(self):

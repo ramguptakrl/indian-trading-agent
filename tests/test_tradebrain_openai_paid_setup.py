@@ -19,12 +19,14 @@ def test_openai_settings_recommend_luna_quick_and_terra_deep():
     assert info["models_deep"][0] == "gpt-5.6-terra"
 
     # Keep Foundation CI lightweight: importing tradingagents.llm_clients pulls optional
-    # runtime SDKs that this unit-test job intentionally does not install. The catalog
-    # contract can be verified directly from source without weakening coverage.
+    # runtime SDKs that this unit-test job intentionally does not install. Verify the stable
+    # model identity contract from source without pinning mutable human-facing taglines.
     root = Path(__file__).resolve().parents[1]
     catalog = (root / "tradingagents/llm_clients/model_catalog.py").read_text(encoding="utf-8")
-    assert '("GPT-5.6 Luna - fast, cost-sensitive agent work", "gpt-5.6-luna")' in catalog
-    assert '("GPT-5.6 Terra - stronger balanced reasoning", "gpt-5.6-terra")' in catalog
+    assert "GPT-5.6 Luna" in catalog
+    assert '"gpt-5.6-luna"' in catalog
+    assert "GPT-5.6 Terra" in catalog
+    assert '"gpt-5.6-terra"' in catalog
 
 
 def test_openai_capacity_falls_back_to_gemini_when_configured():
