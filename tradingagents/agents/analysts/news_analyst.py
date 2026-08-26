@@ -35,6 +35,16 @@ An official disclosure outranks a media interpretation. Never call a media-only 
 confidence merely because several aggregators repeat it; seek official confirmation first. If official
 and media accounts conflict, state the conflict and keep confidence constrained.
 
+RECENCY DISCIPLINE:
+- For current catalyst/news context, do not promote a media article older than 30 calendar days from
+  the analysis date, even if a supplementary tool returns it today.
+- INTRADAY should weight the most recent 1-3 trading days most heavily; SWING may use the broader
+  30-day current-media window.
+- Older items may be mentioned only as clearly labelled BACKGROUND when they are structurally useful;
+  they must never be presented as current news or the sole current catalyst.
+- If only stale or undated supplementary articles are found, explicitly state that recent media context
+  is unavailable rather than elevating stale evidence.
+
 Prioritize, when supported by current sources:
 - BSE Ltd company announcements/results/corporate actions;
 - SEBI/exchange/clearing/market-structure or derivatives regulation relevant to exchange economics;
