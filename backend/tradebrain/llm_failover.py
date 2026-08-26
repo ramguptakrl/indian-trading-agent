@@ -63,7 +63,7 @@ def _parse_duration_seconds(value: Any) -> float | None:
 
 
 def retry_after_seconds(exc: BaseException, *, default: float = 20.0) -> float:
-    """Read Retry-After / Groq reset hints from common OpenAI-compatible errors."""
+    """Read Retry-After / provider reset hints from common capacity errors."""
     response = getattr(exc, "response", None)
     headers = getattr(response, "headers", None)
     if headers:
@@ -85,6 +85,36 @@ def retry_after_seconds(exc: BaseException, *, default: float = 20.0) -> float:
             if parsed is not None and parsed > 0:
                 return parsed
     return max(0.0, default)
+
+
+def capacity_error_summary(exc: BaseException) -> str:
+    """Return a credential-safe, human-readable capacity classification."""
+    text = str(exc).lower()
+    if any(marker in text for marker in (
+        "per day", "per-day", "requests per day", "tokens per day", "daily quota",
+        "rpd", "tpd",
+    )):
+        scope = "daily quota"
+    elif any(marker in text for marker in (
+        "per minute", "per-minute", "requests per minute", "tokens per minute", "rpm", "tpm",
+    )):
+        scope = "minute rate limit"
+    elif "resource_exhausted" in text or "quota" in text or "429" in text or "rate limit" in text:
+        scope = "quota/rate limit"
+    elif any(marker in text for marker in ("503", "502", "504", "overloaded", "capacity")):
+        scope = "temporary provider capacity"
+    else:
+        scope = "temporary provider capacity"
+
+    delay = retry_after_seconds(exc, default=0.0)
+    if delay > 0:
+        if delay >= 120:
+            retry = f"; retry hint ~{max(1, round(delay / 60))} min"
+        else:
+            retry = f"; retry hint ~{max(1, round(delay))} sec"
+    else:
+        retry = ""
+    return f"{scope}{retry}"
 
 
 def response_total_tokens(response: Any) -> int | None:
@@ -142,7 +172,7 @@ class GroqFreeTierGovernor:
         *,
         tpm_budget: int = 6200,
         window_seconds: float = 60.0,
-        output_reserve: int = 1500,
+        output_reserve: int = 1000,
         min_request_interval: float = 1.25,
     ) -> None:
         self.tpm_budget = max(1000, int(tpm_budget))
@@ -254,7 +284,7 @@ def groq_governor_enabled() -> bool:
 
 GLOBAL_GROQ_GOVERNOR = GroqFreeTierGovernor(
     tpm_budget=int(_env_float("TRADEBRAIN_GROQ_SOFT_TPM", 6200)),
-    output_reserve=int(_env_float("TRADEBRAIN_GROQ_OUTPUT_RESERVE", 1500)),
+    output_reserve=int(_env_float("TRADEBRAIN_GROQ_OUTPUT_RESERVE", 1000)),
     min_request_interval=_env_float("TRADEBRAIN_GROQ_MIN_INTERVAL_SECONDS", 1.25),
 )
 
@@ -268,6 +298,12 @@ def get_capacity_fallback_config(config: dict[str, Any]) -> dict[str, Any] | Non
         fallback["llm_provider"] = "google"
         fallback["deep_think_llm"] = "gemini-3.6-flash"
         fallback["quick_think_llm"] = "gemini-3.6-flash"
+        # Fallback exists to finish a blocked analysis, not to spend tens of thousands of
+        # thinking tokens. Gemini 3.6 Flash supports minimal thinking for this purpose.
+        fallback["google_thinking_level"] = (
+            os.getenv("TRADEBRAIN_GEMINI_FALLBACK_THINKING_LEVEL", "minimal").strip()
+            or None
+        )
         return fallback
 
     if provider == "google" and (os.getenv("GROQ_API_KEY") or "").strip():
@@ -296,16 +332,14 @@ def get_material_verifier_config(config: dict[str, Any]) -> dict[str, Any] | Non
 
 def public_capacity_error(exc: BaseException, *, fallback_available: bool) -> str:
     """Return a concise user-safe fail-closed message instead of an SDK error dump."""
+    summary = capacity_error_summary(exc)
     if fallback_available:
         return (
-            "AI_UNAVAILABLE / WAIT: the primary AI provider hit a temporary quota/rate "
-            "limit and the configured alternate provider also could not complete the "
-            "analysis. Trade Brain remains WAIT / NO TRADE. Retry after the cooldown or "
-            "review Settings > Models & Keys."
+            "AI_UNAVAILABLE / WAIT: the primary AI provider was capacity-limited and the "
+            f"configured alternate provider also hit {summary}. Trade Brain remains WAIT / "
+            "NO TRADE. This is provider capacity, not a trading-signal failure."
         )
     return (
-        "AI_UNAVAILABLE / WAIT: the selected AI provider hit a temporary quota/rate "
-        "limit and no configured alternate provider is currently available. Trade Brain "
-        "remains WAIT / NO TRADE. Retry after the provider cooldown or review Settings > "
-        "Models & Keys."
+        f"AI_UNAVAILABLE / WAIT: the selected AI provider hit {summary} and no configured "
+        "alternate provider is currently available. Trade Brain remains WAIT / NO TRADE."
     )
