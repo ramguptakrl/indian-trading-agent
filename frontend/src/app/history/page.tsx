@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { DollarSign, Clock, CheckCircle2, ShieldCheck } from "lucide-react";
+import { DollarSign, Clock, CheckCircle2 } from "lucide-react";
 import { PnLDialog } from "@/components/history/PnLDialog";
 
 const signalColors: Record<string, string> = {
@@ -30,6 +30,16 @@ const pnlStatusColors: Record<string, string> = {
 
 const labelText = (value: string) => value.replaceAll("_", " ");
 const isBseAnalysis = (item: AnalysisHistoryItem) => String(item.ticker || "").toUpperCase().startsWith("BSE");
+
+function horizonLabel(item: any) {
+  const explicit = String(item.requested_trade_mode || "").toUpperCase();
+  if (explicit === "SWING") return "SWING · MTF";
+  if (explicit === "INTRADAY") return "INTRADAY";
+  const task = String(item.task_id || "");
+  if (task.startsWith("sw-")) return "SWING · MTF";
+  if (task.startsWith("id-")) return "INTRADAY";
+  return "LEGACY";
+}
 
 export default function HistoryPage() {
   const [analyses, setAnalyses] = useState<AnalysisHistoryItem[]>([]);
@@ -56,30 +66,23 @@ export default function HistoryPage() {
   const winRate = closed.length ? Math.round((wins / closed.length) * 100) : 0;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-5">
       <div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-2xl font-bold">BSE Analysis Outcomes</h1>
           <Badge variant="outline">NSE:BSE</Badge>
         </div>
         <p className="text-sm text-muted-foreground mt-1">
-          Historical BSE research candidates and optional manually observed outcomes. This page is not the Actual Trades ledger.
+          Research history only. INTRADAY and SWING · MTF are shown separately; real fills belong in Actual Trades.
         </p>
       </div>
 
-      <div className="flex items-start gap-2 rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
-        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-        <span>
-          Manual outcome labels are descriptive research history only. They do not automatically change protected rules or promote a strategy. Use BSE Evidence for audited replay/prospective validation and Actual Trades for real broker fills.
-        </span>
-      </div>
-
       {closed.length > 0 && (
-        <div className="grid grid-cols-4 gap-4">
-          <Card><CardContent className="p-4 text-center"><p className="text-xs text-muted-foreground">Observed Win Rate</p><p className="text-xl font-bold">{winRate}%</p><p className="text-xs text-muted-foreground">{wins}W / {losses}L</p></CardContent></Card>
-          <Card><CardContent className="p-4 text-center"><p className="text-xs text-muted-foreground">Avg Observed Return</p><p className={`text-xl font-bold ${totalPnlPct / closed.length >= 0 ? "text-green-600" : "text-red-600"}`}>{(totalPnlPct / closed.length).toFixed(2)}%</p></CardContent></Card>
-          <Card><CardContent className="p-4 text-center"><p className="text-xs text-muted-foreground">Sum of Observed %</p><p className={`text-xl font-bold ${totalPnlPct >= 0 ? "text-green-600" : "text-red-600"}`}>{totalPnlPct >= 0 ? "+" : ""}{totalPnlPct.toFixed(2)}%</p></CardContent></Card>
-          <Card><CardContent className="p-4 text-center"><p className="text-xs text-muted-foreground">Closed Outcomes</p><p className="text-xl font-bold">{closed.length}</p><p className="text-xs text-muted-foreground">{open.length} open</p></CardContent></Card>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Card><CardContent className="p-3 text-center"><p className="text-[11px] text-muted-foreground">Observed Win Rate</p><p className="text-lg font-bold">{winRate}%</p><p className="text-[10px] text-muted-foreground">{wins}W / {losses}L</p></CardContent></Card>
+          <Card><CardContent className="p-3 text-center"><p className="text-[11px] text-muted-foreground">Avg Observed Return</p><p className={`text-lg font-bold ${totalPnlPct / closed.length >= 0 ? "text-green-600" : "text-red-600"}`}>{(totalPnlPct / closed.length).toFixed(2)}%</p></CardContent></Card>
+          <Card><CardContent className="p-3 text-center"><p className="text-[11px] text-muted-foreground">Sum Observed %</p><p className={`text-lg font-bold ${totalPnlPct >= 0 ? "text-green-600" : "text-red-600"}`}>{totalPnlPct >= 0 ? "+" : ""}{totalPnlPct.toFixed(2)}%</p></CardContent></Card>
+          <Card><CardContent className="p-3 text-center"><p className="text-[11px] text-muted-foreground">Closed Outcomes</p><p className="text-lg font-bold">{closed.length}</p><p className="text-[10px] text-muted-foreground">{open.length} open</p></CardContent></Card>
         </div>
       )}
 
@@ -102,10 +105,14 @@ export default function HistoryPage() {
               <CardContent className="p-0">
                 <Table>
                   <TableHeader><TableRow>
-                    <TableHead>India Analysis Date</TableHead><TableHead>Research Label</TableHead>
-                    <TableHead className="text-right">Observed Entry</TableHead><TableHead className="text-right">Observed Exit</TableHead>
-                    <TableHead className="text-right">Observed P&L</TableHead><TableHead>Outcome</TableHead>
-                    <TableHead className="text-right">Analysis Time</TableHead><TableHead></TableHead>
+                    <TableHead>India Date</TableHead>
+                    <TableHead>Horizon</TableHead>
+                    <TableHead>Verdict</TableHead>
+                    <TableHead className="text-right">Entry</TableHead>
+                    <TableHead className="text-right">Exit</TableHead>
+                    <TableHead className="text-right">P&L</TableHead>
+                    <TableHead>Outcome</TableHead>
+                    <TableHead></TableHead>
                   </TableRow></TableHeader>
                   <TableBody>
                     {loading ? (
@@ -116,17 +123,17 @@ export default function HistoryPage() {
                       </TableCell></TableRow>
                     ) : tab.data.map((a: any) => (
                       <TableRow key={a.task_id}>
-                        <TableCell className="text-sm"><div className="font-medium">{a.trade_date}</div><div className="text-[10px] text-muted-foreground">BSE Ltd · NSE:BSE</div></TableCell>
+                        <TableCell className="text-sm font-medium">{a.trade_date}</TableCell>
+                        <TableCell><Badge variant="outline">{horizonLabel(a)}</Badge></TableCell>
                         <TableCell><Badge variant="outline" className={signalColors[a.signal] || "bg-slate-500/10 text-slate-700"}>{labelText(a.signal)}</Badge></TableCell>
                         <TableCell className="text-right text-sm">{a.entry_price ? `₹${a.entry_price}` : "-"}</TableCell>
                         <TableCell className="text-right text-sm">{a.exit_price ? `₹${a.exit_price}` : "-"}</TableCell>
                         <TableCell className={`text-right text-sm ${(a.pnl_pct || 0) >= 0 ? "text-green-600" : "text-red-600"}`}>{a.pnl_pct != null ? `${a.pnl_pct >= 0 ? "+" : ""}${a.pnl_pct}%` : "-"}</TableCell>
                         <TableCell>{a.pnl_status ? <Badge variant="outline" className={pnlStatusColors[a.pnl_status] || ""}>{a.pnl_status}</Badge> : <span className="text-xs text-muted-foreground">-</span>}</TableCell>
-                        <TableCell className="text-right text-sm text-muted-foreground">{a.duration_seconds ? `${Math.round(a.duration_seconds)}s` : "-"}</TableCell>
-                        <TableCell><div className="flex items-center gap-2">
+                        <TableCell><div className="flex items-center justify-end gap-2">
                           <Link href={`/analysis/${a.task_id}`} className="text-xs text-primary hover:underline">View</Link>
                           <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setDialog({ taskId: a.task_id, signal: a.signal })}>
-                            <DollarSign className="h-3 w-3 mr-1" /> {a.pnl_status === "open" ? "Close Outcome" : "Log Outcome"}
+                            <DollarSign className="h-3 w-3 mr-1" /> {a.pnl_status === "open" ? "Close" : "Log"}
                           </Button>
                         </div></TableCell>
                       </TableRow>
