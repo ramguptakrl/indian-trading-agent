@@ -13,11 +13,11 @@ The pack is evidence only. It never authorizes or places an order.
 from __future__ import annotations
 
 from datetime import datetime, time, timezone
+from html.parser import HTMLParser
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import requests
-from parsel import Selector
 
 from backend.tradebrain.corporate_event_store import list_events
 from backend.tradebrain.corporate_events import collect_nse_corporate_events
@@ -38,6 +38,34 @@ _SEBI_RELEVANCE_TERMS = (
     "market infrastructure", "mii", "surveillance", "price band", "trading",
     "settlement", "broker", "investor protection", "index provider", "technology",
 )
+
+
+class _AnchorParser(HTMLParser):
+    """Tiny dependency-free anchor extractor for official SEBI listing pages."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._href: str | None = None
+        self._text: list[str] = []
+        self.anchors: list[tuple[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "a" or self._href is not None:
+            return
+        values = dict(attrs)
+        self._href = str(values.get("href") or "")
+        self._text = []
+
+    def handle_data(self, data: str) -> None:
+        if self._href is not None:
+            self._text.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "a" and self._href is not None:
+            text = " ".join(" ".join(self._text).split())
+            self.anchors.append((text, self._href))
+            self._href = None
+            self._text = []
 
 
 def _cutoff(trade_date: str) -> datetime:
@@ -94,24 +122,27 @@ def _fetch_sebi_listing(url: str, *, timeout: int = 12, limit: int = 6) -> list[
     }
     response = requests.get(url, headers=headers, timeout=timeout)
     response.raise_for_status()
-    selector = Selector(text=response.text)
+    parser = _AnchorParser()
+    parser.feed(response.text)
     items: list[dict[str, Any]] = []
-    # SEBI listing markup changes occasionally; use broad anchor/date extraction and keep
-    # only exchange/market-structure material so the pack remains small.
-    for anchor in selector.css("a"):
-        title = _clip(" ".join(anchor.css("::text").getall()), 260)
-        href = str(anchor.attrib.get("href") or "").strip()
+    seen: set[tuple[str, str]] = set()
+    for raw_title, raw_href in parser.anchors:
+        title = _clip(raw_title, 260)
+        href = str(raw_href or "").strip()
         if not title or not any(term in title.lower() for term in _SEBI_RELEVANCE_TERMS):
             continue
         if href.startswith("/"):
             href = "https://www.sebi.gov.in" + href
-        parent_text = _clip(" ".join(anchor.xpath("ancestor::*[self::tr or self::div][1]//text()").getall()), 360)
+        key = (title.casefold(), href)
+        if key in seen:
+            continue
+        seen.add(key)
         items.append({
             "source_tier": "OFFICIAL_REGULATOR",
             "source": "SEBI",
-            "date": parent_text,
+            "date": "CURRENT_OFFICIAL_LISTING",
             "title": title,
-            "detail": "Official SEBI circular/press-release listing context.",
+            "detail": "Official SEBI circular/press-release listing context; open the official item for exact publication details.",
             "url": href or url,
             "official_fact": True,
         })
@@ -123,7 +154,9 @@ def _fetch_sebi_listing(url: str, *, timeout: int = 12, limit: int = 6) -> list[
 def _archived_media(cutoff: datetime, *, limit: int = 8) -> list[dict[str, Any]]:
     rows = query_news_known_by(cutoff, limit=100)
     priority = {"BSE_DIRECT": 0, "BSE_MARKET_CONTEXT": 1, "GENERAL_MARKET_CONTEXT": 2}
-    rows.sort(key=lambda row: (priority.get(str(row.get("relevance") or ""), 9), str(row.get("first_seen_at") or "")), reverse=False)
+    # query_news_known_by is already newest-first; stable sorting by relevance preserves
+    # newest-first order within each relevance tier.
+    rows.sort(key=lambda row: priority.get(str(row.get("relevance") or ""), 9))
     output: list[dict[str, Any]] = []
     for row in rows[:limit]:
         output.append({
