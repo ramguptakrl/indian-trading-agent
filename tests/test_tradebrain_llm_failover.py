@@ -13,6 +13,7 @@ from backend.tradebrain.llm_failover import (
     groq_governor_enabled,
     is_retryable_llm_capacity_error,
     public_capacity_error,
+    response_total_tokens,
     retry_after_seconds,
 )
 
@@ -54,12 +55,50 @@ class TradeBrainLLMFailoverTests(unittest.TestCase):
             os.environ["TRADEBRAIN_GROQ_GOVERNOR"] = "0"
             self.assertFalse(groq_governor_enabled())
 
-    def test_governor_uses_headroom_below_hard_tpm(self):
-        governor = GroqFreeTierGovernor(tpm_budget=7600, output_reserve=1200)
+    def test_governor_uses_conservative_headroom_below_hard_tpm(self):
+        governor = GroqFreeTierGovernor(tpm_budget=6200, output_reserve=1500)
         reservation = governor.reserve("small prompt")
-        self.assertEqual(reservation["soft_tpm_budget"], 7600)
-        self.assertGreaterEqual(reservation["estimated_tokens"], 1200)
-        self.assertLess(reservation["estimated_tokens"], 7600)
+        self.assertEqual(reservation["soft_tpm_budget"], 6200)
+        self.assertGreaterEqual(reservation["estimated_tokens"], 1500)
+        self.assertLess(reservation["estimated_tokens"], 6200)
+        self.assertGreater(reservation["reservation_id"], 0)
+
+    def test_response_total_tokens_reads_langchain_usage_metadata(self):
+        response = SimpleNamespace(
+            usage_metadata={"input_tokens": 2100, "output_tokens": 900, "total_tokens": 3000},
+            response_metadata={},
+        )
+        self.assertEqual(response_total_tokens(response), 3000)
+
+    def test_response_total_tokens_reads_openai_response_metadata(self):
+        response = SimpleNamespace(
+            usage_metadata=None,
+            response_metadata={"token_usage": {"prompt_tokens": 1800, "completion_tokens": 700}},
+        )
+        self.assertEqual(response_total_tokens(response), 2500)
+
+    def test_governor_reconciles_estimate_to_actual_usage(self):
+        governor = GroqFreeTierGovernor(tpm_budget=6200, output_reserve=1500, min_request_interval=0)
+        reservation = governor.reserve("tiny")
+        response = SimpleNamespace(
+            usage_metadata={"total_tokens": 3100},
+            response_metadata={},
+        )
+        actual = governor.reconcile(reservation, response)
+        self.assertEqual(actual, 3100)
+        self.assertEqual(governor.snapshot()["rolling_tokens"], 3100)
+
+    def test_capacity_rejected_reservation_can_be_released(self):
+        governor = GroqFreeTierGovernor(tpm_budget=6200, output_reserve=1500, min_request_interval=0)
+        reservation = governor.reserve("tiny")
+        self.assertGreater(governor.snapshot()["rolling_tokens"], 0)
+        governor.release(reservation)
+        self.assertEqual(governor.snapshot()["rolling_tokens"], 0)
+
+    def test_provider_cooldown_is_process_wide(self):
+        governor = GroqFreeTierGovernor(tpm_budget=6200, output_reserve=1500, min_request_interval=0)
+        governor.impose_cooldown(0.05)
+        self.assertGreater(governor.snapshot()["cooldown_remaining_seconds"], 0)
 
     def test_google_uses_groq_when_local_key_exists(self):
         config = {
