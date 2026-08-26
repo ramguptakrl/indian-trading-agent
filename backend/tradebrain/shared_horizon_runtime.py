@@ -33,6 +33,12 @@ from backend.tradebrain.llm_failover import (
     public_capacity_error,
 )
 from backend.tradebrain.llm_verifier import verify_material_finding
+from backend.tradebrain.shared_reports import (
+    SHARED_REPORT_FIELDS,
+    analyst_for_report,
+    merge_shared_report_snapshot,
+    missing_required_reports,
+)
 from backend.ws import manager
 from tradingagents.graph.propagation import Propagator
 from tradingagents.graph.setup import (
@@ -42,13 +48,6 @@ from tradingagents.graph.setup import (
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 
 SHARED_RESEARCH_VERSION = "BSE_SHARED_RESEARCH_PACK_V1"
-_REPORT_BY_ANALYST = {
-    "market": "market_report",
-    "social": "sentiment_report",
-    "news": "news_report",
-    "fundamentals": "fundamentals_report",
-}
-_SHARED_REPORT_FIELDS = tuple(_REPORT_BY_ANALYST.values())
 _DOWNSTREAM_REPORT_FIELDS = (
     "investment_plan",
     "trader_investment_plan",
@@ -87,6 +86,60 @@ def _capacity_attempt(
             ) from fallback_error
 
 
+def _run_shared_analyst_graph(
+    *,
+    ticker: str,
+    trade_date: str,
+    context_prompt: str,
+    config: dict[str, Any],
+    selected_analysts: list[str],
+    on_report: Callable[[str, str], None] | None,
+) -> dict[str, Any]:
+    """Run selected shared analysts and retain reports across every streamed state.
+
+    The terminal LangGraph chunk is not treated as the sole source of truth. Analyst reports
+    may have appeared in earlier chunks and later message/tool-clear chunks are allowed to
+    omit those fields. Retaining them here prevents a completed News/Market/Fundamentals
+    report from being lost merely because it was absent from the final emitted chunk.
+    """
+    ta = TradingAgentsGraph(
+        selected_analysts=selected_analysts,
+        debug=False,
+        config=config,
+    )
+    propagator = Propagator(max_recur_limit=config.get("max_recur_limit", 100))
+    initial_state = propagator.create_initial_state(
+        ticker,
+        trade_date,
+        multi_timeframe_context=context_prompt,
+    )
+
+    final_state: dict[str, Any] | None = None
+    observed_reports: dict[str, str] = {}
+    for chunk in ta.graph.stream(initial_state, **propagator.get_graph_args()):
+        final_state = chunk
+        merge_shared_report_snapshot(
+            observed_reports,
+            chunk,
+            on_report=on_report,
+        )
+
+    if final_state is None:
+        raise RuntimeError("Shared BSE research graph completed without producing a state")
+
+    # Some LangGraph stream modes retain fields only in the terminal state while others
+    # surface them earlier. Merge the terminal state as well; the helper de-duplicates it.
+    merge_shared_report_snapshot(
+        observed_reports,
+        final_state,
+        on_report=on_report,
+    )
+    return {
+        "final_state": final_state,
+        "reports": observed_reports,
+    }
+
+
 def build_shared_research_pack(
     *,
     ticker: str,
@@ -96,7 +149,12 @@ def build_shared_research_pack(
     pack_id: str | None = None,
     on_report: Callable[[str, str], None] | None = None,
 ) -> dict[str, Any]:
-    """Run common BSE analyst research exactly once and freeze the resulting pack."""
+    """Run common BSE analyst research exactly once and freeze the resulting pack.
+
+    If a selected analyst genuinely returns no report, retry only that analyst once using
+    the same audited context and normal provider-capacity failover. We never silently drop a
+    required analyst and never publish a trade decision from an incomplete shared pack.
+    """
     if not selected_analysts:
         raise ValueError("At least one analyst is required for shared BSE research")
 
@@ -110,42 +168,64 @@ def build_shared_research_pack(
     shared_config.pop("requested_trade_mode", None)
 
     def execute(current_config: dict[str, Any]) -> dict[str, Any]:
-        ta = TradingAgentsGraph(
-            selected_analysts=selected_analysts,
-            debug=False,
+        return _run_shared_analyst_graph(
+            ticker=ticker,
+            trade_date=trade_date,
+            context_prompt=context_prompt,
             config=current_config,
+            selected_analysts=list(selected_analysts),
+            on_report=on_report,
         )
-        propagator = Propagator(max_recur_limit=current_config.get("max_recur_limit", 100))
-        initial_state = propagator.create_initial_state(
-            ticker,
-            trade_date,
-            multi_timeframe_context=context_prompt,
+
+    run_result, active_config, failover_used = _capacity_attempt(shared_config, execute)
+    reports = {
+        field: str(run_result["reports"].get(field) or "").strip()
+        for field in SHARED_REPORT_FIELDS
+    }
+
+    # A blank report can occur if an analyst finishes its tool loop but the final model
+    # response contains no narrative. Retry only the missing analyst instead of re-running
+    # all completed shared research and burning provider quota again.
+    missing = missing_required_reports(selected_analysts, reports)
+    targeted_retries: list[str] = []
+    for field in list(missing):
+        analyst = analyst_for_report(field)
+        if analyst is None:
+            continue
+        targeted_retries.append(analyst)
+
+        def repair_execute(
+            current_config: dict[str, Any],
+            analyst_name: str = analyst,
+        ) -> dict[str, Any]:
+            return _run_shared_analyst_graph(
+                ticker=ticker,
+                trade_date=trade_date,
+                context_prompt=context_prompt,
+                config=current_config,
+                selected_analysts=[analyst_name],
+                on_report=on_report,
+            )
+
+        repair_result, repair_config, repair_failover = _capacity_attempt(
+            active_config,
+            repair_execute,
         )
-        final_state = None
-        seen: dict[str, str] = {}
-        for chunk in ta.graph.stream(initial_state, **propagator.get_graph_args()):
-            final_state = chunk
-            for field in _SHARED_REPORT_FIELDS:
-                value = chunk.get(field)
-                if value and value != seen.get(field):
-                    seen[field] = str(value)
-                    if on_report is not None:
-                        on_report(field, str(value))
-        if final_state is None:
-            raise RuntimeError("Shared BSE research graph completed without producing a state")
-        return final_state
+        failover_used = bool(failover_used or repair_failover)
+        active_config = repair_config
+        for report_field, value in repair_result["reports"].items():
+            text = str(value or "").strip()
+            if text:
+                reports[report_field] = text
 
-    final_state, active_config, failover_used = _capacity_attempt(shared_config, execute)
-    reports = {field: str(final_state.get(field) or "") for field in _SHARED_REPORT_FIELDS}
-
-    missing = [
-        _REPORT_BY_ANALYST[analyst]
-        for analyst in selected_analysts
-        if analyst in _REPORT_BY_ANALYST and not reports.get(_REPORT_BY_ANALYST[analyst])
-    ]
+    missing = missing_required_reports(selected_analysts, reports)
     if missing:
+        owners = [analyst_for_report(field) or field for field in missing]
+        pretty = ", ".join(name.replace("_", " ").title() for name in owners)
         raise RuntimeError(
-            "Shared BSE research did not produce required report(s): " + ", ".join(missing)
+            "Shared BSE research incomplete after targeted retry: "
+            f"{pretty} returned no usable report. No INTRADAY or SWING trade decision "
+            "was published."
         )
 
     provider_config = dict(active_config)
@@ -157,6 +237,7 @@ def build_shared_research_pack(
         "trade_date": trade_date,
         "analysts": list(selected_analysts),
         "reports": reports,
+        "targeted_analyst_retries": targeted_retries,
         "multi_timeframe_context": context_prompt,
         "context_status": context.get("status"),
         "context_as_of": context.get("as_of"),
@@ -304,6 +385,7 @@ def run_horizon_from_shared_pack(
             "provider": shared_pack["provider"],
             "llm_failover_used": shared_pack["llm_failover_used"],
             "context_as_of": shared_pack["context_as_of"],
+            "targeted_analyst_retries": shared_pack.get("targeted_analyst_retries", []),
         }
 
         if material_verifier.get("status") not in {
@@ -363,6 +445,7 @@ def run_horizon_from_shared_pack(
             "shared_research_llm_failover_used": shared_pack["llm_failover_used"],
             "shared_context_as_of": shared_pack["context_as_of"],
             "shared_context_status": shared_pack["context_status"],
+            "shared_targeted_analyst_retries": shared_pack.get("targeted_analyst_retries", []),
             "material_verifier": material_verifier,
             "market_report": shared_pack["reports"].get("market_report"),
             "sentiment_report": shared_pack["reports"].get("sentiment_report"),
