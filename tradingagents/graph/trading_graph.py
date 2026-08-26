@@ -118,6 +118,13 @@ class TradingAgentsGraph:
         kwargs = {}
         provider = self.config.get("llm_provider", "").lower()
 
+        # One shared id follows the entire Analyze INTRADAY + SWING click through shared
+        # research, both horizon graphs, retries, and alternate-provider failover. Provider
+        # wrappers use it only for the emergency runaway/billing circuit breaker.
+        run_id = str(self.config.get("tradebrain_run_id") or "").strip()
+        if run_id:
+            kwargs["tradebrain_run_id"] = run_id
+
         if provider == "google":
             thinking_level = self.config.get("google_thinking_level")
             if thinking_level:
