@@ -23,6 +23,13 @@ class TradeBrainLLMClientResilienceTests(unittest.TestCase):
         self.assertIn('"max_retries": 2', self.openai_source)
         self.assertIn("explicit config overrides safe defaults", self.openai_source)
 
+    def test_groq_uses_tradebrain_governor_instead_of_opaque_sdk_retries(self):
+        self.assertIn('if self.provider == "groq":', self.openai_source)
+        self.assertIn('llm_kwargs["max_retries"] = 0', self.openai_source)
+        self.assertIn("GLOBAL_GROQ_GOVERNOR.reserve(input)", self.openai_source)
+        self.assertIn("retry_after_seconds(exc)", self.openai_source)
+        self.assertIn("tradebrain_groq_max_retry_wait_seconds", self.openai_source)
+
     def test_gemini_client_has_bounded_defaults(self):
         self.assertIn('"timeout": 60', self.google_source)
         self.assertIn('"max_retries": 2', self.google_source)
