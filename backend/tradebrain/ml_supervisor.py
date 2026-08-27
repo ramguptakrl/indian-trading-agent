@@ -221,6 +221,8 @@ def run_ml_research_cycle(
                 ):
                     registered = mark_historical_pass(
                         registered["model_id"],
+                        promotion_quality=promotion_quality,
+                        cpcv_robustness=cpcv,
                         root=registry_path,
                     )
             record = {
