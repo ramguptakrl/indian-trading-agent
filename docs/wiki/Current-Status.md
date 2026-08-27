@@ -1,14 +1,22 @@
 # Current Status
 
-_Last updated at Wiki bootstrap: 2026-08-27 UTC._
+_Last handoff status update:_
+
+- **Toronto / Eastern Time:** 2026-08-26 21:26:54 EDT (UTC-04:00)
+- **India Standard Time:** 2026-08-27 06:56:54 IST (UTC+05:30)
+- **UTC:** 2026-08-27 01:26:54 UTC
+
+For the exact cross-chat resume point, read [Session Handoff](Session-Handoff).
 
 ## Active development state
 
 - Branch: `tradebrain/reframe-foundation`
-- Branch head when this page was created: `a33c6769e0e7fb664f0337e65260004c71414282`
+- Branch head at handoff-capture start: `23a1ba16d21dac5dbb5d0aab530e850e543f9469`
+- Latest research-code commit before Wiki-only handoff/documentation commits: `a33c6769e0e7fb664f0337e65260004c71414282`
 - Pull request: PR #1 remains open/unmerged unless explicitly approved for merge.
 - Last fully certified statistical-governance boundary: `5700f2e8282583ef7f9acb87a5641a4ccf23d379`
 - That certified boundary passed the frontend contract, full Trade Brain unit suite, observational smoke phases, and evidence-baseline build/upload.
+- Newer research modules and handoff/Wiki commits are **not** automatically green merely because that older boundary passed.
 
 ## Certified statistical-governance layer
 
@@ -90,6 +98,16 @@ The existing supervised model families are conventional tabular estimators, not 
 - Extra Trees
 - Histogram Gradient Boosting
 
+## Current empirical research verdict
+
+There is **no approved champion**.
+
+- Intraday Long: rejected under hardened evidence.
+- Intraday Short: rejected under hardened evidence.
+- Swing Long MTF: rejected for promotion after the stronger drawdown/friction/regime/CPCV checks.
+- The 2026 historical holdout has already been opened once and is consumed. It is no longer an untouched selection resource.
+- Future prospective market sessions are the cleanest new evidence.
+
 ## Chronology contract
 
 Current default chronology:
@@ -111,6 +129,12 @@ Holdout is not an optimization resource.
 - `INSUFFICIENT_CHRONOLOGY`
 
 `NO_ROBUST_CANDIDATE` is a legitimate research result, not a software failure.
+
+## Immediate next action
+
+**Run exact-head CI/test certification for the newest combined research modules before adding further model hypotheses.**
+
+After that, continue from `Session-Handoff` / `Roadmap-and-Next-Steps`.
 
 ## Production/training claim boundary
 
