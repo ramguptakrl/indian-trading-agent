@@ -8,12 +8,24 @@ import numpy as np
 import pandas as pd
 
 from backend.tradebrain.ml_distribution_drift import build_psi_baseline, psi_feature_report
-from backend.tradebrain.ml_research_ledger import ResearchBudget, record_trials, research_ledger_summary
+from backend.tradebrain.ml_research_ledger import (
+    ResearchBudget,
+    record_selected_dsr,
+    record_trials,
+    research_ledger_summary,
+)
 
 
 class MLResearchGovernanceTests(unittest.TestCase):
     @staticmethod
-    def _trial(feature_set: str, family: str, threshold: float, sharpe: float):
+    def _trial(
+        feature_set: str,
+        family: str,
+        threshold: float,
+        sharpe: float,
+        *,
+        profit_factor: float = 0.95,
+    ):
         return {
             "feature_set": feature_set,
             "feature_schema_hash": f"schema-{feature_set}",
@@ -23,7 +35,12 @@ class MLResearchGovernanceTests(unittest.TestCase):
             "status": "REJECTED",
             "reason": "unit-test",
             "robustness_score": -0.25,
-            "validation": {"trade_sharpe": sharpe},
+            "validation": {
+                "trade_sharpe": sharpe,
+                "profit_factor": profit_factor,
+                "mean_net_return_pct": -0.01,
+                "trades": 40,
+            },
         }
 
     def test_research_ledger_deduplicates_repeated_candidate_but_preserves_history(self):
@@ -57,29 +74,75 @@ class MLResearchGovernanceTests(unittest.TestCase):
             self.assertEqual(second["distinct_hypothesis_families"], 2)
             self.assertEqual(len(second["validation_trade_sharpes"]), 3)
 
-    def test_hypothesis_budget_is_separate_from_raw_candidate_count(self):
+    def test_budget_exhausts_one_family_not_the_whole_task(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ledger.json"
-            trials = []
-            for idx in range(5):
-                trials.append(self._trial(f"FEATURE_{idx}", f"FAMILY_{idx}", 0.50, 0.01 * idx))
-                trials.append(self._trial(f"FEATURE_{idx}", f"FAMILY_{idx}", 0.55, 0.01 * idx + 0.001))
+            trials = [
+                self._trial("TREND", "TREE", 0.50 + idx * 0.01, 0.01 * idx)
+                for idx in range(5)
+            ]
+            # A separate scientific family exists but has only one candidate.
+            trials.append(self._trial("MEAN_REVERSION", "LOGIT", 0.50, 0.03))
             record_trials(
                 task="BSE_INTRADAY_SHORT",
                 trials=trials,
                 dataset_snapshot_hash="snapshot-2",
                 code_version="unit-test",
+                architecture="BASELINE",
                 path=path,
             )
             summary = research_ledger_summary(
                 task="BSE_INTRADAY_SHORT",
                 path=path,
-                budget=ResearchBudget(max_hypothesis_families=5),
+                budget=ResearchBudget(max_candidates_per_hypothesis_family=5),
             )
-            self.assertEqual(summary["distinct_candidate_configurations"], 10)
-            self.assertEqual(summary["distinct_hypothesis_families"], 5)
+            self.assertEqual(summary["distinct_candidate_configurations"], 6)
+            self.assertEqual(summary["distinct_hypothesis_families"], 2)
+            self.assertEqual(summary["exhausted_hypothesis_family_count"], 1)
             self.assertTrue(summary["research_budget_exhausted"])
-            self.assertFalse(summary["new_automatic_hypothesis_search_allowed"])
+            self.assertFalse(summary["new_parameter_search_in_exhausted_family_allowed"])
+            self.assertTrue(summary["new_predeclared_hypothesis_family_allowed"])
+
+    def test_dsr_pass_reopens_family_even_at_candidate_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ledger.json"
+            trials = [
+                self._trial("TREND", "TREE", 0.50 + idx * 0.01, 0.05 + 0.01 * idx, profit_factor=1.2)
+                for idx in range(5)
+            ]
+            record_trials(
+                task="BSE_INTRADAY_LONG",
+                trials=trials,
+                dataset_snapshot_hash="snapshot-3",
+                code_version="unit-test",
+                architecture="BASELINE",
+                path=path,
+            )
+            before = research_ledger_summary(
+                task="BSE_INTRADAY_LONG",
+                path=path,
+                budget=ResearchBudget(max_candidates_per_hypothesis_family=5),
+            )
+            self.assertEqual(before["exhausted_hypothesis_family_count"], 1)
+            record_selected_dsr(
+                task="BSE_INTRADAY_LONG",
+                winner=trials[-1],
+                dsr_evidence={
+                    "passed": True,
+                    "verdict": "DSR_PASS",
+                    "deflated_sharpe_probability": 0.98,
+                    "method_version": "TEST_DSR",
+                },
+                architecture="BASELINE",
+                path=path,
+            )
+            after = research_ledger_summary(
+                task="BSE_INTRADAY_LONG",
+                path=path,
+                budget=ResearchBudget(max_candidates_per_hypothesis_family=5),
+            )
+            self.assertEqual(after["exhausted_hypothesis_family_count"], 0)
+            self.assertTrue(after["hypothesis_families"][0]["any_selected_candidate_passed_dsr"])
 
     def test_psi_uses_discovery_distribution_and_detects_large_shift(self):
         rng = np.random.default_rng(123)
