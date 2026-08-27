@@ -20,7 +20,7 @@ from backend.tradebrain.ml_models import METHOD_VERSION as MODEL_METHOD_VERSION,
 from backend.tradebrain.ml_optimizer import OptimizationResult, serializable_result
 from backend.tradebrain.ml_promotion import DEFAULT_PROMOTION_THRESHOLDS
 
-METHOD_VERSION = "BSE_ML_REGISTRY_V2"
+METHOD_VERSION = "BSE_ML_REGISTRY_V3"
 
 STAGE_RESEARCH = "RESEARCH_CANDIDATE"
 STAGE_HISTORICAL_PASS = "HISTORICAL_WALKFORWARD_PASS"
@@ -172,6 +172,7 @@ def register_optimization(
         "promotion_quality": None,
         "cpcv_robustness": None,
         "multiple_testing_evidence": None,
+        "bootstrap_confidence": None,
         "shadow_buffer_evidence": None,
         "promotion_history": [
             {
@@ -252,6 +253,8 @@ def _transition(
             raise ValueError("Purged CPCV robustness gate is not satisfied")
         if not bool((metadata.get("multiple_testing_evidence") or {}).get("passed")):
             raise ValueError("DSR/PBO multiple-testing clearance is not satisfied")
+        if not bool((metadata.get("bootstrap_confidence") or {}).get("passed")):
+            raise ValueError("Stationary-bootstrap confidence gate is not satisfied")
     if target in {STAGE_FROZEN, STAGE_ELIGIBLE, STAGE_CHAMPION} and not human_approved:
         raise PermissionError(f"{target} requires explicit human approval")
     if target == STAGE_SHADOW and current != STAGE_FROZEN:
@@ -293,18 +296,20 @@ def mark_historical_pass(
     promotion_quality: dict[str, Any],
     cpcv_robustness: dict[str, Any],
     multiple_testing_evidence: dict[str, Any],
+    bootstrap_confidence: dict[str, Any],
     root: str | Path | None = None,
 ) -> dict[str, Any]:
     return _transition(
         model_id,
         target=STAGE_HISTORICAL_PASS,
-        reason="OOS_WALK_FORWARD_HARD_GATE_CPCV_DSR_PBO_PASS",
+        reason="OOS_HARD_GATE_CPCV_DSR_PBO_BOOTSTRAP_PASS",
         human_approved=False,
         root=root,
         evidence_updates={
             "promotion_quality": dict(promotion_quality),
             "cpcv_robustness": dict(cpcv_robustness),
             "multiple_testing_evidence": dict(multiple_testing_evidence),
+            "bootstrap_confidence": dict(bootstrap_confidence),
         },
     )
 
