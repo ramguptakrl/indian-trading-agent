@@ -19,10 +19,15 @@
 
 ## Immutable checkpoint for this handoff
 
-A timestamped immutable checkpoint branch is created after this handoff source is committed. The exact branch and SHA are recorded below and in `Checkpoints-and-Recovery` once created.
+- **Checkpoint branch:** `checkpoint/tradebrain-handoff-2026-08-26-2127-et`
+- **Checkpoint SHA:** `e340d983db0a40f8c8990cbb8558c3f748423423`
+- **Checkpoint timestamp — Toronto:** 2026-08-26 21:26:54 EDT
+- **Checkpoint timestamp — IST:** 2026-08-27 06:56:54 IST
+- **Checkpoint timestamp — UTC:** 2026-08-27 01:26:54 UTC
+- **Purpose:** preserve the current ML research/governance implementation together with the timestamped cross-chat Wiki handoff system before exact-head certification of the newest research modules.
+- **Immutability:** do not repoint this checkpoint branch. Create a new timestamped checkpoint instead.
 
-- Checkpoint branch: `PENDING_CREATION`
-- Checkpoint SHA: `PENDING_CREATION`
+The active working branch continues to move after this checkpoint because the Wiki pages record the checkpoint itself. That is expected; the checkpoint SHA above remains the recovery anchor.
 
 ## ML state at handoff
 
