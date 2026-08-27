@@ -412,44 +412,51 @@ def optimize_labeled_dataset(
             oos_stress_20x=None,
             walk_forward=[],
             metadata={
+                "dataset_snapshot_hash": bundle.metadata.get("dataset_snapshot_hash"),
                 "rows": {name: int(len(value)) for name, value in split.items()},
+                "holdout_rows_unseen": int(len(holdout)),
                 "holdout_evaluated": False,
-                "chronology_method": "BSE_ML_CHRONOLOGY_V1",
-                "reason": "NO_VALIDATION_CANDIDATE_SURVIVED_ROBUSTNESS",
+                "automatic_policy_change": False,
+                "trade_authorization": False,
+                "order_execution_allowed": False,
             },
         )
 
-    frozen_spec = best["model_spec"]
     frozen_columns = tuple(best["feature_columns"])
+    frozen_spec: ModelSpec = best["model_spec"]
     threshold = float(best["threshold"])
-    discovery_train = pd.concat([train, validation], ignore_index=True)
+
+    train_validation = pd.concat([train, validation], ignore_index=True)
     frozen_model = fit_model(
-        discovery_train,
+        train_validation,
         feature_columns=frozen_columns,
         spec=frozen_spec,
         random_state=config.random_state,
     )
     oos_probabilities = predict_positive_probability(frozen_model, oos, feature_columns=frozen_columns)
-    oos_normal, oos_stress15, oos_stress20 = _metrics(oos, oos_probabilities, threshold)
+    oos_normal, oos15, oos20 = _metrics(oos, oos_probabilities, threshold)
     oos_pass, oos_reason = _passes_robustness(
         oos_normal,
-        oos_stress15,
-        oos_stress20,
+        oos15,
+        oos20,
         min_trades=config.min_oos_trades,
     )
 
     walk_forward = _walk_forward_for_winner(
-        frame.loc[pd.to_datetime(frame["ts_close"], utc=True) < chronology.holdout_start].copy(),
+        pd.concat([train, validation, oos], ignore_index=True),
         feature_columns=frozen_columns,
         spec=frozen_spec,
         threshold=threshold,
         random_state=config.random_state,
     )
-    best = dict(best)
-    best.pop("model_spec", None)
-    best["feature_columns"] = list(frozen_columns)
-    best.update(
+    winner = {
+        key: value for key, value in best.items() if key not in {"feature_columns", "model_spec"}
+    }
+    winner.update(
         {
+            "feature_columns": list(frozen_columns),
+            "family": frozen_spec.family,
+            "params": dict(frozen_spec.params),
             "oos_pass": bool(oos_pass),
             "oos_reason": oos_reason,
             "feature_importance": feature_importance(frozen_model, frozen_columns)[:30],
@@ -461,14 +468,21 @@ def optimize_labeled_dataset(
         "task": task,
         "dataset_snapshot_hash": bundle.metadata.get("dataset_snapshot_hash"),
         "feature_method_version": bundle.metadata.get("method_version"),
-        "chronology_method": "BSE_ML_CHRONOLOGY_V1",
-        "chronology": asdict(chronology),
+        "label_method_version": bundle.metadata.get("label_method_version"),
+        "label_spec": bundle.metadata.get("label_spec"),
+        "cost_profile_key": bundle.metadata.get("cost_profile_key"),
+        "mtf_profile_key": bundle.metadata.get("mtf_profile_key"),
         "rows": {name: int(len(value)) for name, value in split.items()},
-        "holdout_rows": int(len(holdout)),
+        "holdout_rows_unseen": int(len(holdout)),
         "holdout_evaluated": False,
-        "selection_period": "VALIDATION_ONLY",
-        "oos_used_for_selection": False,
-        "feature_baseline": _feature_baseline(discovery_train, frozen_columns),
+        "selection_data": ["TRAIN", "VALIDATION"],
+        "oos_used_for_hyperparameter_selection": False,
+        "random_state": config.random_state,
+        "deep_search": config.deep_search,
+        "trial_count": len(trials),
+        "feature_baseline": _feature_baseline(train_validation, frozen_columns),
+        "automatic_policy_change": False,
+        "human_review_required_for_promotion": True,
         "advisory_only": True,
         "trade_authorization": False,
         "order_execution_allowed": False,
@@ -478,11 +492,27 @@ def optimize_labeled_dataset(
         task=task,
         model=frozen_model,
         feature_columns=frozen_columns,
-        winner=best,
+        winner=winner,
         trials=trials,
         oos_metrics=oos_normal,
-        oos_stress_15x=oos_stress15,
-        oos_stress_20x=oos_stress20,
+        oos_stress_15x=oos15,
+        oos_stress_20x=oos20,
         walk_forward=walk_forward,
         metadata=metadata,
     )
+
+
+def serializable_result(result: OptimizationResult) -> dict[str, Any]:
+    return {
+        "status": result.status,
+        "task": result.task,
+        "feature_columns": list(result.feature_columns),
+        "winner": result.winner,
+        "trials": result.trials,
+        "oos_metrics": result.oos_metrics,
+        "oos_stress_15x": result.oos_stress_15x,
+        "oos_stress_20x": result.oos_stress_20x,
+        "walk_forward": result.walk_forward,
+        "metadata": result.metadata,
+        "model_embedded": False,
+    }
