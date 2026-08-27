@@ -18,6 +18,7 @@ import joblib
 
 from backend.tradebrain.ml_models import METHOD_VERSION as MODEL_METHOD_VERSION, feature_schema_hash
 from backend.tradebrain.ml_optimizer import OptimizationResult, serializable_result
+from backend.tradebrain.ml_promotion import DEFAULT_PROMOTION_THRESHOLDS
 
 METHOD_VERSION = "BSE_ML_REGISTRY_V1"
 
@@ -167,6 +168,9 @@ def register_optimization(
         "historical_walk_forward_pass": bool(
             result.status == "OOS_PASS" and _walk_forward_pass(result.walk_forward)
         ),
+        "promotion_quality": None,
+        "cpcv_robustness": None,
+        "shadow_buffer_evidence": None,
         "promotion_history": [
             {
                 "at": created,
@@ -221,8 +225,11 @@ def _transition(
     reason: str,
     human_approved: bool,
     root: str | Path | None,
+    evidence_updates: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     metadata = read_metadata(model_id, root=root)
+    if evidence_updates:
+        metadata.update(evidence_updates)
     current = str(metadata.get("stage"))
     allowed = {
         STAGE_RESEARCH: {STAGE_HISTORICAL_PASS},
@@ -234,12 +241,28 @@ def _transition(
     }
     if target not in allowed.get(current, set()):
         raise ValueError(f"Invalid ML promotion transition: {current} -> {target}")
-    if target == STAGE_HISTORICAL_PASS and not metadata.get("historical_walk_forward_pass"):
-        raise ValueError("Historical/OOS robustness criteria are not satisfied")
+    if target == STAGE_HISTORICAL_PASS:
+        if not metadata.get("historical_walk_forward_pass"):
+            raise ValueError("Historical/OOS robustness criteria are not satisfied")
+        if not bool((metadata.get("promotion_quality") or {}).get("passed")):
+            raise ValueError("Hardened historical promotion-quality gate is not satisfied")
+        if not bool((metadata.get("cpcv_robustness") or {}).get("passed")):
+            raise ValueError("Purged CPCV robustness gate is not satisfied")
     if target in {STAGE_FROZEN, STAGE_ELIGIBLE, STAGE_CHAMPION} and not human_approved:
         raise PermissionError(f"{target} requires explicit human approval")
     if target == STAGE_SHADOW and current != STAGE_FROZEN:
         raise ValueError("Only a frozen challenger may enter shadow mode")
+    if target == STAGE_ELIGIBLE:
+        shadow = metadata.get("shadow_buffer_evidence") or {}
+        if not bool(shadow.get("passed")):
+            raise ValueError("30-session prospective shadow buffer has not passed")
+        if int(shadow.get("continuous_trailing_market_sessions") or 0) < int(
+            DEFAULT_PROMOTION_THRESHOLDS.min_shadow_sessions
+        ):
+            raise ValueError("Prospective shadow buffer is shorter than the required market sessions")
+        hashes = list(shadow.get("artifact_hashes_seen") or [])
+        if hashes != [str(metadata.get("model_sha256") or "")]:
+            raise ValueError("Shadow buffer was not produced by one unchanged frozen artifact")
 
     now = datetime.now(timezone.utc).isoformat()
     metadata["stage"] = target
@@ -260,13 +283,23 @@ def _transition(
     return metadata
 
 
-def mark_historical_pass(model_id: str, *, root: str | Path | None = None) -> dict[str, Any]:
+def mark_historical_pass(
+    model_id: str,
+    *,
+    promotion_quality: dict[str, Any],
+    cpcv_robustness: dict[str, Any],
+    root: str | Path | None = None,
+) -> dict[str, Any]:
     return _transition(
         model_id,
         target=STAGE_HISTORICAL_PASS,
-        reason="OOS_AND_WALK_FORWARD_ROBUSTNESS_PASS",
+        reason="OOS_WALK_FORWARD_HARD_GATE_AND_CPCV_PASS",
         human_approved=False,
         root=root,
+        evidence_updates={
+            "promotion_quality": dict(promotion_quality),
+            "cpcv_robustness": dict(cpcv_robustness),
+        },
     )
 
 
@@ -301,6 +334,7 @@ def mark_integration_eligible(
     *,
     reason: str,
     human_approved: bool,
+    shadow_buffer_evidence: dict[str, Any],
     root: str | Path | None = None,
 ) -> dict[str, Any]:
     return _transition(
@@ -309,6 +343,7 @@ def mark_integration_eligible(
         reason=reason,
         human_approved=human_approved,
         root=root,
+        evidence_updates={"shadow_buffer_evidence": dict(shadow_buffer_evidence)},
     )
 
 
