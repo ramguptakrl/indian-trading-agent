@@ -126,7 +126,8 @@ def record_trials(
         existing["seen_count"] = int(existing.get("seen_count") or 0) + 1
         existing["latest_status"] = str(trial.get("status") or "UNKNOWN")
         existing["latest_reason"] = str(trial.get("reason") or "")[:300]
-        existing["latest_validation_trade_sharpe"] = trial.get("validation_trade_sharpe")
+        validation = trial.get("validation") or {}
+        existing["latest_validation_trade_sharpe"] = validation.get("trade_sharpe")
         existing["latest_robustness_score"] = trial.get("robustness_score")
         existing["dataset_snapshot_hash"] = dataset_snapshot_hash
         existing["code_version"] = str(code_version)
