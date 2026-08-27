@@ -1,7 +1,7 @@
 """Hard promotion-quality gates for Trade Brain v0.14 ML.
 
 An optimizer result may be scientifically interesting without being safe enough to advance.
-This module separates those concepts.  It consumes only historical/OOS evidence already
+This module separates those concepts. It consumes only historical/OOS evidence already
 produced before prospective shadow operation; it never trains, retunes, promotes, or places
 orders.
 """
@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 
-METHOD_VERSION = "BSE_ML_PROMOTION_V1"
+METHOD_VERSION = "BSE_ML_PROMOTION_V2"
 
 
 @dataclass(frozen=True)
@@ -58,12 +58,13 @@ def evaluate_historical_promotion(
     result: Any,
     *,
     thresholds: PromotionThresholds = DEFAULT_PROMOTION_THRESHOLDS,
+    multiple_testing_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a fail-closed verdict for historical promotion quality.
 
-    The final configured holdout is intentionally absent from this function.  A holdout that
+    The final configured holdout is intentionally absent from this function. A holdout that
     has already been inspected remains evidence, but can never be used to relax or tune these
-    gates.
+    gates. Researcher-selection-bias evidence (DSR + PBO) is also mandatory.
     """
 
     thresholds.validate()
@@ -78,6 +79,13 @@ def evaluate_historical_promotion(
     checks["optimizer_status"] = status
     if status != "OOS_PASS":
         failures.append("OPTIMIZER_DID_NOT_PASS_OOS")
+
+    multiple_testing = dict(multiple_testing_evidence or {})
+    checks["multiple_testing"] = multiple_testing or None
+    if not multiple_testing:
+        failures.append("MULTIPLE_TESTING_EVIDENCE_MISSING")
+    elif not bool(multiple_testing.get("passed")):
+        failures.append("MULTIPLE_TESTING_CLEARANCE_REJECTED")
 
     trades = int(_number(normal, "trades", 0.0))
     checks["oos_trades"] = trades
@@ -148,6 +156,7 @@ def evaluate_historical_promotion(
         "failures": failures,
         "checks": checks,
         "thresholds": asdict(thresholds),
+        "multiple_testing_required": True,
         "holdout_used_for_threshold_tuning": False,
         "automatic_promotion": False,
         "human_review_still_required": True,
