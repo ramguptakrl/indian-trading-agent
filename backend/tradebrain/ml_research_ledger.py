@@ -4,6 +4,9 @@ A rejected experiment must not disappear from the multiple-testing denominator j
 new process starts tomorrow. The ledger deduplicates exact candidate configurations while also
 tracking broader hypothesis families separately from parameter/threshold sweeps.
 
+Kill budgets apply *within* a scientific hypothesis family. Exhausting one family must not
+silently ban a genuinely different, predeclared research hypothesis.
+
 The ledger is research governance only. It cannot promote a model or place orders.
 """
 from __future__ import annotations
@@ -16,16 +19,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-METHOD_VERSION = "BSE_ML_RESEARCH_LEDGER_V1"
+METHOD_VERSION = "BSE_ML_RESEARCH_LEDGER_V2"
 
 
 @dataclass(frozen=True)
 class ResearchBudget:
-    max_hypothesis_families: int = 50
+    max_candidates_per_hypothesis_family: int = 50
 
     def validate(self) -> None:
-        if self.max_hypothesis_families < 5:
-            raise ValueError("max_hypothesis_families is too small")
+        if self.max_candidates_per_hypothesis_family < 5:
+            raise ValueError("max_candidates_per_hypothesis_family is too small")
 
 
 DEFAULT_RESEARCH_BUDGET = ResearchBudget()
@@ -121,6 +124,8 @@ def record_trials(
                 **identity,
                 "first_seen_at": now,
                 "seen_count": 0,
+                "selected_dsr_passed": None,
+                "selected_dsr_probability": None,
             }
         existing["last_seen_at"] = now
         existing["seen_count"] = int(existing.get("seen_count") or 0) + 1
@@ -128,6 +133,9 @@ def record_trials(
         existing["latest_reason"] = str(trial.get("reason") or "")[:300]
         validation = trial.get("validation") or {}
         existing["latest_validation_trade_sharpe"] = validation.get("trade_sharpe")
+        existing["latest_validation_profit_factor"] = validation.get("profit_factor")
+        existing["latest_validation_mean_net_return_pct"] = validation.get("mean_net_return_pct")
+        existing["latest_validation_trades"] = validation.get("trades")
         existing["latest_robustness_score"] = trial.get("robustness_score")
         existing["dataset_snapshot_hash"] = dataset_snapshot_hash
         existing["code_version"] = str(code_version)
@@ -149,6 +157,54 @@ def record_trials(
     return summary
 
 
+def record_selected_dsr(
+    *,
+    task: str,
+    winner: dict[str, Any],
+    dsr_evidence: dict[str, Any],
+    architecture: str | None = None,
+    path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Attach DSR evidence to the exact validation-selected ledger candidate."""
+    ledger_path = default_ledger_path(path)
+    ledger = _load(ledger_path)
+    candidates = dict(ledger.get("candidates") or {})
+    identity = candidate_identity(task=task, trial=winner, architecture=architecture)
+    key = identity["candidate_fingerprint"]
+    existing = candidates.get(key)
+    if existing is None:
+        # Fail closed: do not manufacture a trial record that was never in the search ledger.
+        summary = research_ledger_summary(task=task, path=ledger_path)
+        summary["selected_dsr_recorded"] = False
+        summary["selected_dsr_reason"] = "WINNER_NOT_FOUND_IN_PERSISTENT_LEDGER"
+        return summary
+    row = dict(existing)
+    row["selected_dsr_passed"] = bool(dsr_evidence.get("passed"))
+    row["selected_dsr_probability"] = (dsr_evidence.get("deflated_sharpe_probability"))
+    row["selected_dsr_verdict"] = dsr_evidence.get("verdict")
+    row["selected_dsr_method_version"] = dsr_evidence.get("method_version")
+    row["selected_dsr_recorded_at"] = datetime.now(timezone.utc).isoformat()
+    candidates[key] = row
+    ledger["candidates"] = candidates
+    ledger["method_version"] = METHOD_VERSION
+    ledger["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _save(ledger_path, ledger)
+    summary = research_ledger_summary(task=task, path=ledger_path)
+    summary["selected_dsr_recorded"] = True
+    summary["selected_dsr_candidate_fingerprint"] = key
+    return summary
+
+
+def _finite_number(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed != parsed or parsed in {float("inf"), float("-inf")}:
+        return None
+    return parsed
+
+
 def research_ledger_summary(
     *,
     task: str | None = None,
@@ -161,34 +217,62 @@ def research_ledger_summary(
     rows = list((ledger.get("candidates") or {}).values())
     if task is not None:
         rows = [row for row in rows if str((row.get("candidate") or {}).get("task")) == str(task)]
-    families = {
-        str(row.get("hypothesis_family_fingerprint"))
-        for row in rows
-        if row.get("hypothesis_family_fingerprint")
-    }
-    sharpes = []
+
+    sharpes: list[float] = []
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        value = row.get("latest_validation_trade_sharpe")
-        try:
-            value = float(value)
-        except (TypeError, ValueError):
-            continue
-        if value == value and value not in {float("inf"), float("-inf")}:
+        family_key = str(row.get("hypothesis_family_fingerprint") or "")
+        if family_key:
+            grouped.setdefault(family_key, []).append(row)
+        value = _finite_number(row.get("latest_validation_trade_sharpe"))
+        if value is not None:
             sharpes.append(value)
-    family_count = len(families)
-    exhausted = family_count >= budget.max_hypothesis_families
+
+    family_summaries: list[dict[str, Any]] = []
+    for family_key, family_rows in sorted(grouped.items()):
+        sharpes_family = [
+            value for value in (_finite_number(row.get("latest_validation_trade_sharpe")) for row in family_rows)
+            if value is not None
+        ]
+        pfs = [
+            value for value in (_finite_number(row.get("latest_validation_profit_factor")) for row in family_rows)
+            if value is not None
+        ]
+        dsr_passes = [row for row in family_rows if row.get("selected_dsr_passed") is True]
+        candidate_count = len(family_rows)
+        exhausted = candidate_count >= budget.max_candidates_per_hypothesis_family and not dsr_passes
+        family_summaries.append(
+            {
+                "hypothesis_family_fingerprint": family_key,
+                "hypothesis_family": dict(family_rows[0].get("hypothesis_family") or {}),
+                "distinct_candidate_configurations": candidate_count,
+                "best_validation_trade_sharpe": max(sharpes_family) if sharpes_family else None,
+                "best_validation_profit_factor": max(pfs) if pfs else None,
+                "any_selected_candidate_passed_dsr": bool(dsr_passes),
+                "budget_exhausted_without_dsr_pass": exhausted,
+                "new_parameter_search_allowed": not exhausted,
+            }
+        )
+
+    exhausted_families = [
+        row for row in family_summaries if row["budget_exhausted_without_dsr_pass"]
+    ]
     return {
         "method_version": METHOD_VERSION,
         "task": task,
         "distinct_candidate_configurations": len(rows),
-        "distinct_hypothesis_families": family_count,
+        "distinct_hypothesis_families": len(grouped),
         "validation_trade_sharpes": sharpes,
         "research_budget": asdict(budget),
-        "research_budget_exhausted": exhausted,
-        "new_automatic_hypothesis_search_allowed": not exhausted,
-        "human_review_required_to_expand_budget": exhausted,
+        "hypothesis_families": family_summaries,
+        "exhausted_hypothesis_families": exhausted_families,
+        "exhausted_hypothesis_family_count": len(exhausted_families),
+        "research_budget_exhausted": bool(exhausted_families),
+        "new_parameter_search_in_exhausted_family_allowed": False,
+        "new_predeclared_hypothesis_family_allowed": True,
+        "human_review_required_to_reopen_exhausted_family": bool(exhausted_families),
         "candidate_count_is_multiple_testing_denominator": True,
-        "hypothesis_family_count_is_kill_budget_denominator": True,
+        "family_candidate_count_is_kill_budget_denominator": True,
         "automatic_promotion": False,
         "advisory_only": True,
         "trade_authorization": False,
