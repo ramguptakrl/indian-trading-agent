@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
+import pandas as pd
+
+from backend.tradebrain.ml_cpcv import evaluate_cpcv_candidate
 from backend.tradebrain.ml_labels import (
     TASK_INTRADAY_LONG,
     TASK_INTRADAY_SHORT,
@@ -24,6 +27,7 @@ from backend.tradebrain.ml_labels import (
 from backend.tradebrain.ml_optimizer import OptimizerConfig, optimize_labeled_dataset, serializable_result
 from backend.tradebrain.ml_promotion import evaluate_historical_promotion
 from backend.tradebrain.ml_registry import mark_historical_pass, register_optimization, registry_root
+from backend.tradebrain.ml_validation import DEFAULT_CHRONOLOGY
 from backend.tradebrain.schedule import get_operating_mode
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -91,6 +95,42 @@ def _due(last_run: str | None, current: datetime, cadence_days: int) -> bool:
     if previous.tzinfo is None:
         previous = previous.replace(tzinfo=IST)
     return current >= previous.astimezone(IST) + timedelta(days=max(1, int(cadence_days)))
+
+
+def _cpcv_evidence(bundle, optimization) -> dict[str, Any]:
+    if optimization.status != "OOS_PASS" or not optimization.winner:
+        return {
+            "passed": False,
+            "verdict": "CPCV_NOT_RUN_NO_OOS_PASS",
+            "used_for_hyperparameter_selection": False,
+            "automatic_promotion": False,
+            "advisory_only": True,
+            "trade_authorization": False,
+            "order_execution_allowed": False,
+        }
+    try:
+        cutoff = pd.Timestamp(DEFAULT_CHRONOLOGY.holdout_start)
+        pre_holdout = bundle.frame.loc[
+            pd.to_datetime(bundle.frame["ts_close"], utc=True) < cutoff
+        ].copy()
+        return evaluate_cpcv_candidate(
+            pre_holdout,
+            feature_columns=optimization.feature_columns,
+            family=str(optimization.winner.get("family")),
+            params=dict(optimization.winner.get("params") or {}),
+            threshold=float(optimization.winner.get("threshold")),
+        )
+    except Exception as exc:
+        return {
+            "passed": False,
+            "verdict": "CPCV_FAILED_SAFE",
+            "error": f"{type(exc).__name__}:{str(exc)[:500]}",
+            "used_for_hyperparameter_selection": False,
+            "automatic_promotion": False,
+            "advisory_only": True,
+            "trade_authorization": False,
+            "order_execution_allowed": False,
+        }
 
 
 def run_ml_research_cycle(
@@ -166,6 +206,7 @@ def run_ml_research_cycle(
             optimization = optimize_labeled_dataset(bundle, config=config)
             serial = serializable_result(optimization)
             promotion_quality = evaluate_historical_promotion(optimization)
+            cpcv = _cpcv_evidence(bundle, optimization)
             registered = None
             if optimization.status == "OOS_PASS":
                 registered = register_optimization(
@@ -173,7 +214,11 @@ def run_ml_research_cycle(
                     code_version=version,
                     root=registry_path,
                 )
-                if registered.get("historical_walk_forward_pass") and promotion_quality.get("passed"):
+                if (
+                    registered.get("historical_walk_forward_pass")
+                    and promotion_quality.get("passed")
+                    and cpcv.get("passed")
+                ):
                     registered = mark_historical_pass(
                         registered["model_id"],
                         root=registry_path,
@@ -182,6 +227,7 @@ def run_ml_research_cycle(
                 **serial,
                 "dataset_metadata": bundle.metadata,
                 "promotion_quality": promotion_quality,
+                "cpcv_robustness": cpcv,
                 "registered_model": registered,
                 "run_id": run_id,
                 "supervisor_method_version": METHOD_VERSION,
@@ -201,6 +247,8 @@ def run_ml_research_cycle(
                 "trial_count": len(optimization.trials),
                 "promotion_quality_verdict": promotion_quality.get("verdict"),
                 "promotion_quality_failures": promotion_quality.get("failures") or [],
+                "cpcv_verdict": cpcv.get("verdict"),
+                "cpcv_passed": bool(cpcv.get("passed")),
                 "registered_model_id": (registered or {}).get("model_id"),
                 "registered_stage": (registered or {}).get("stage"),
                 "artifact_path": artifact_path,
