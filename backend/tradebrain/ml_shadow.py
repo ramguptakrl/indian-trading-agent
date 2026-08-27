@@ -11,6 +11,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -25,6 +26,7 @@ from backend.tradebrain.ml_registry import (
 
 METHOD_VERSION = "BSE_ML_SHADOW_V1"
 _ALLOWED = {STAGE_SHADOW, STAGE_ELIGIBLE, STAGE_CHAMPION}
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def _data_root() -> Path:
@@ -42,6 +44,15 @@ def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str) + "\n")
+
+
+def _session_ist(value: Any) -> str:
+    parsed = pd.Timestamp(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.tz_localize("UTC")
+    else:
+        parsed = parsed.tz_convert("UTC")
+    return parsed.tz_convert(IST).date().isoformat()
 
 
 def shadow_infer(
@@ -76,17 +87,23 @@ def shadow_infer(
         raise ValueError("Current feature bundle has no completed bars")
 
     row = bundle.frame.tail(1).copy()
+    as_of = str(row.iloc[0].get("ts_close"))
     probability = float(
         predict_positive_probability(model, row, feature_columns=expected_columns)[0]
     )
     threshold = float(metadata.get("probability_threshold") or 0.5)
     oos = metadata.get("oos") or {}
+    model_sha256 = str(metadata.get("model_sha256") or "")
+    if not model_sha256:
+        raise ValueError("ML artifact metadata has no model hash; refusing unauditable shadow inference")
     result = {
         "method_version": METHOD_VERSION,
         "model_id": metadata["model_id"],
+        "model_sha256": model_sha256,
         "model_status": stage,
         "task": metadata.get("task"),
-        "as_of": str(row.iloc[0].get("ts_close")),
+        "as_of": as_of,
+        "shadow_session_ist": _session_ist(as_of),
         "probability_net_positive": probability,
         "probability_threshold": threshold,
         "model_signal": "POSITIVE_EDGE" if probability >= threshold else "NO_MODEL_EDGE",
@@ -96,6 +113,7 @@ def shadow_infer(
         "dataset_snapshot_hash": metadata.get("dataset_snapshot_hash"),
         "feature_schema_hash": metadata.get("feature_schema_hash"),
         "feature_method_version": actual_method,
+        "retuned_during_shadow_session": False,
         "shadow_only": True,
         "advisory_weight_applied": False,
         "automatic_policy_change": False,
