@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
@@ -24,6 +25,7 @@ from backend.tradebrain.ml_bootstrap_confidence import (
 )
 from backend.tradebrain.ml_cpcv import evaluate_cpcv_candidate
 from backend.tradebrain.ml_distribution_drift import build_psi_baseline
+from backend.tradebrain.ml_kill_criteria import evaluate_research_kill_criteria
 from backend.tradebrain.ml_labels import (
     TASK_INTRADAY_LONG,
     TASK_INTRADAY_SHORT,
@@ -35,15 +37,20 @@ from backend.tradebrain.ml_optimizer import OptimizerConfig, optimize_labeled_da
 from backend.tradebrain.ml_pbo import evaluate_pbo_from_optimizer
 from backend.tradebrain.ml_promotion import evaluate_historical_promotion
 from backend.tradebrain.ml_registry import mark_historical_pass, register_optimization, registry_root
-from backend.tradebrain.ml_research_ledger import record_trials
+from backend.tradebrain.ml_research_ledger import (
+    record_selected_dsr,
+    record_trials,
+    research_ledger_summary,
+)
 from backend.tradebrain.ml_selection_bias import evaluate_dsr_from_optimizer, multiple_testing_clearance
 from backend.tradebrain.ml_validation import DEFAULT_CHRONOLOGY, chronological_split
 from backend.tradebrain.schedule import get_operating_mode
 
 IST = ZoneInfo("Asia/Kolkata")
-METHOD_VERSION = "BSE_ML_SUPERVISOR_V3"
+METHOD_VERSION = "BSE_ML_SUPERVISOR_V4"
 TASK_ORDER = (TASK_INTRADAY_LONG, TASK_INTRADAY_SHORT, TASK_SWING_LONG_MTF)
 ALLOWED_TRAINING_MODES = {"POST_MARKET_STUDY", "STUDY_REPLAY"}
+BASELINE_ARCHITECTURE = "BASELINE_OPTIMIZER"
 
 
 def _data_root() -> Path:
@@ -105,6 +112,20 @@ def _due(last_run: str | None, current: datetime, cadence_days: int) -> bool:
     if previous.tzinfo is None:
         previous = previous.replace(tzinfo=IST)
     return current >= previous.astimezone(IST) + timedelta(days=max(1, int(cadence_days)))
+
+
+def _exhausted_optimizer_families(ledger_summary: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    """Return exact killed baseline families without banning unrelated hypotheses."""
+    blocked: set[tuple[str, str]] = set()
+    for row in ledger_summary.get("exhausted_hypothesis_families") or []:
+        family = row.get("hypothesis_family") or {}
+        if str(family.get("architecture") or "") != BASELINE_ARCHITECTURE:
+            continue
+        feature_set = str(family.get("feature_set") or "").strip()
+        model_family = str(family.get("family") or "").strip()
+        if feature_set and model_family:
+            blocked.add((feature_set, model_family))
+    return tuple(sorted(blocked))
 
 
 def _cpcv_evidence(bundle, optimization) -> dict[str, Any]:
@@ -297,18 +318,43 @@ def run_ml_research_cycle(
                 as_of=cutoff,
                 db_path=db_path,
             )
-            optimization = optimize_labeled_dataset(bundle, config=config)
+            presearch_ledger = research_ledger_summary(
+                task=task,
+                path=research_ledger_path,
+            )
+            excluded_families = _exhausted_optimizer_families(presearch_ledger)
+            task_config = replace(
+                config,
+                excluded_hypothesis_families=excluded_families,
+            )
+            optimization = optimize_labeled_dataset(bundle, config=task_config)
             ledger_summary = record_trials(
                 task=task,
                 trials=optimization.trials,
                 dataset_snapshot_hash=bundle.metadata.get("dataset_snapshot_hash"),
                 code_version=version,
-                architecture="BASELINE_OPTIMIZER",
+                architecture=BASELINE_ARCHITECTURE,
                 path=research_ledger_path,
             )
             if optimization.winner:
                 optimization.metadata["psi_baseline"] = _psi_baseline(bundle, optimization)
             multiple_testing = _selection_bias_evidence(bundle, optimization, ledger_summary)
+            if optimization.winner:
+                dsr_evidence = dict(multiple_testing.get("dsr") or {})
+                if dsr_evidence:
+                    ledger_summary = record_selected_dsr(
+                        task=task,
+                        winner=optimization.winner,
+                        dsr_evidence=dsr_evidence,
+                        architecture=BASELINE_ARCHITECTURE,
+                        path=research_ledger_path,
+                    )
+            kill_criteria = evaluate_research_kill_criteria(
+                optimization,
+                ledger_summary,
+                architecture=BASELINE_ARCHITECTURE,
+            )
+            advancement_blocked_by_kill_criteria = bool(kill_criteria.get("candidate_killed"))
             bootstrap_confidence = _bootstrap_evidence(bundle, optimization)
             promotion_quality = evaluate_historical_promotion(
                 optimization,
@@ -318,7 +364,7 @@ def run_ml_research_cycle(
             cpcv = _cpcv_evidence(bundle, optimization)
             serial = serializable_result(optimization)
             registered = None
-            if optimization.status == "OOS_PASS":
+            if optimization.status == "OOS_PASS" and not advancement_blocked_by_kill_criteria:
                 registered = register_optimization(
                     optimization,
                     code_version=version,
@@ -339,11 +385,19 @@ def run_ml_research_cycle(
                         bootstrap_confidence=bootstrap_confidence,
                         root=registry_path,
                     )
+            excluded_family_rows = [
+                {"feature_set": feature_set, "family": family}
+                for feature_set, family in excluded_families
+            ]
             record = {
                 **serial,
                 "dataset_metadata": bundle.metadata,
+                "presearch_research_ledger": presearch_ledger,
+                "optimizer_excluded_hypothesis_families": excluded_family_rows,
                 "research_ledger": ledger_summary,
                 "multiple_testing_evidence": multiple_testing,
+                "kill_criteria": kill_criteria,
+                "advancement_blocked_by_kill_criteria": advancement_blocked_by_kill_criteria,
                 "bootstrap_confidence": bootstrap_confidence,
                 "promotion_quality": promotion_quality,
                 "cpcv_robustness": cpcv,
@@ -364,12 +418,20 @@ def run_ml_research_cycle(
                 "dataset_rows": int(len(bundle.frame)),
                 "dataset_snapshot_hash": bundle.metadata.get("dataset_snapshot_hash"),
                 "trial_count": len(optimization.trials),
+                "optimizer_excluded_hypothesis_families": excluded_family_rows,
                 "research_candidate_count": ledger_summary.get("distinct_candidate_configurations"),
                 "research_hypothesis_family_count": ledger_summary.get("distinct_hypothesis_families"),
                 "research_budget_exhausted": bool(ledger_summary.get("research_budget_exhausted")),
+                "selected_dsr_recorded": bool(ledger_summary.get("selected_dsr_recorded")),
                 "multiple_testing_verdict": multiple_testing.get("verdict"),
                 "dsr_verdict": ((multiple_testing.get("dsr") or {}).get("verdict")),
                 "pbo_verdict": ((multiple_testing.get("pbo") or {}).get("verdict")),
+                "kill_criteria_verdict": kill_criteria.get("verdict"),
+                "candidate_killed": bool(kill_criteria.get("candidate_killed")),
+                "hypothesis_family_killed": bool(kill_criteria.get("hypothesis_family_killed")),
+                "candidate_kill_reasons": kill_criteria.get("candidate_reasons") or [],
+                "hypothesis_family_kill_reasons": kill_criteria.get("hypothesis_family_reasons") or [],
+                "advancement_blocked_by_kill_criteria": advancement_blocked_by_kill_criteria,
                 "bootstrap_confidence_verdict": bootstrap_confidence.get("verdict"),
                 "promotion_quality_verdict": promotion_quality.get("verdict"),
                 "promotion_quality_failures": promotion_quality.get("failures") or [],
@@ -429,6 +491,9 @@ def run_ml_research_cycle(
             "human_review_required_for_advisory_integration": True,
             "multiple_testing_clearance_required": True,
             "bootstrap_confidence_required": True,
+            "kill_criteria_clearance_required": True,
+            "killed_hypothesis_family_parameter_search_allowed": False,
+            "new_predeclared_hypothesis_family_allowed": True,
         },
         "advisory_only": True,
         "trade_authorization": False,
