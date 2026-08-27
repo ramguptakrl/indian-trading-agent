@@ -167,6 +167,8 @@ def trading_metrics(
     gross_profit = float(returns[returns > 0.0].sum()) if len(returns) else 0.0
     gross_loss = float(-returns[returns < 0.0].sum()) if len(returns) else 0.0
     profit_factor = gross_profit / gross_loss if gross_loss > 0.0 else (999.0 if gross_profit > 0.0 else 0.0)
+    return_std = float(np.std(returns, ddof=1)) if len(returns) > 1 else 0.0
+    trade_sharpe = float(np.mean(returns) / return_std) if return_std > 0.0 else 0.0
     years = pd.to_datetime(selected_frame["ts_close"], utc=True).dt.year if len(selected_frame) else pd.Series(dtype=int)
     year_expectancy = {}
     for year in sorted(set(years.tolist())):
@@ -193,6 +195,8 @@ def trading_metrics(
         "win_rate_pct": float((returns > 0.0).mean() * 100.0) if len(returns) else 0.0,
         "mean_net_return_pct": float(np.mean(returns)) if len(returns) else 0.0,
         "median_net_return_pct": float(np.median(returns)) if len(returns) else 0.0,
+        "std_net_return_pct": return_std,
+        "trade_sharpe": trade_sharpe,
         "sum_net_return_pct": float(np.sum(returns)) if len(returns) else 0.0,
         "profit_factor": float(profit_factor),
         "max_drawdown_pct": max_drawdown_from_returns(returns),
