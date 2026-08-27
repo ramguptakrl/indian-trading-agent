@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -78,6 +77,23 @@ class MLOptimizerSafetyTests(unittest.TestCase):
             ),
         )
 
+    @staticmethod
+    def _promotion_evidence():
+        return {
+            "promotion_quality": {"passed": True, "verdict": "PROMOTION_QUALITY_PASS"},
+            "cpcv_robustness": {"passed": True, "verdict": "CPCV_ROBUSTNESS_PASS"},
+            "multiple_testing_evidence": {
+                "passed": True,
+                "verdict": "MULTIPLE_TESTING_CLEAR",
+                "dsr": {"passed": True},
+                "pbo": {"passed": True},
+            },
+            "bootstrap_confidence": {
+                "passed": True,
+                "verdict": "BOOTSTRAP_CONFIDENCE_PASS",
+            },
+        }
+
     def test_required_five_baseline_model_families_are_present(self):
         families = {spec.family for spec in default_model_specs()}
         self.assertEqual(families, set(MODEL_FAMILIES))
@@ -94,6 +110,9 @@ class MLOptimizerSafetyTests(unittest.TestCase):
         self.assertGreater(result.oos_metrics["trades"], 0)
         self.assertGreater(result.oos_stress_15x["mean_net_return_pct"], 0.0)
         self.assertGreater(result.oos_stress_20x["mean_net_return_pct"], 0.0)
+        self.assertIn("trade_sharpe", result.oos_metrics)
+        self.assertIn("return_skewness", result.oos_metrics)
+        self.assertIn("return_kurtosis", result.oos_metrics)
 
     def test_optimizer_is_reproducible_with_fixed_seed(self):
         first = self._optimize()
@@ -124,19 +143,31 @@ class MLOptimizerSafetyTests(unittest.TestCase):
                     root=tmp,
                 )
 
+            evidence = self._promotion_evidence()
             with self.assertRaises(ValueError):
                 mark_historical_pass(
                     metadata["model_id"],
                     promotion_quality={"passed": False},
-                    cpcv_robustness={"passed": True},
+                    cpcv_robustness=evidence["cpcv_robustness"],
+                    multiple_testing_evidence=evidence["multiple_testing_evidence"],
+                    bootstrap_confidence=evidence["bootstrap_confidence"],
+                    root=tmp,
+                )
+
+            with self.assertRaises(ValueError):
+                mark_historical_pass(
+                    metadata["model_id"],
+                    promotion_quality=evidence["promotion_quality"],
+                    cpcv_robustness=evidence["cpcv_robustness"],
+                    multiple_testing_evidence={"passed": False},
+                    bootstrap_confidence=evidence["bootstrap_confidence"],
                     root=tmp,
                 )
 
             historical = mark_historical_pass(
                 metadata["model_id"],
-                promotion_quality={"passed": True},
-                cpcv_robustness={"passed": True},
                 root=tmp,
+                **evidence,
             )
             self.assertEqual(historical["stage"], STAGE_HISTORICAL_PASS)
             with self.assertRaises(PermissionError):
@@ -157,19 +188,19 @@ class MLOptimizerSafetyTests(unittest.TestCase):
             shadow = enable_shadow(metadata["model_id"], root=tmp)
             self.assertEqual(shadow["stage"], STAGE_SHADOW)
 
-            evidence = shadow_infer(
+            evidence_row = shadow_infer(
                 metadata["model_id"],
                 self._bundle(),
                 registry_root=tmp,
                 persist=False,
             )
-            self.assertEqual(evidence["model_status"], STAGE_SHADOW)
-            self.assertTrue(evidence["shadow_only"])
-            self.assertTrue(evidence["model_sha256"])
-            self.assertTrue(evidence["shadow_session_ist"])
-            self.assertFalse(evidence["advisory_weight_applied"])
-            self.assertFalse(evidence["trade_authorization"])
-            self.assertFalse(evidence["order_execution_allowed"])
+            self.assertEqual(evidence_row["model_status"], STAGE_SHADOW)
+            self.assertTrue(evidence_row["shadow_only"])
+            self.assertTrue(evidence_row["model_sha256"])
+            self.assertTrue(evidence_row["shadow_session_ist"])
+            self.assertFalse(evidence_row["advisory_weight_applied"])
+            self.assertFalse(evidence_row["trade_authorization"])
+            self.assertFalse(evidence_row["order_execution_allowed"])
 
     def test_feature_drift_alert_is_observational_only(self):
         result = self._optimize()
