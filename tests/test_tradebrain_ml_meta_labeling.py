@@ -58,8 +58,14 @@ class MLMetaLabelingTests(unittest.TestCase):
         self.assertTrue(first.all())
 
     def test_mean_reversion_long_and_short_have_deterministic_direction(self):
-        long_mask = primary_signal_mask(self._bundle("BSE_INTRADAY_LONG"), signal_family=SIGNAL_MEAN_REVERSION)
-        short_mask = primary_signal_mask(self._bundle("BSE_INTRADAY_SHORT"), signal_family=SIGNAL_MEAN_REVERSION)
+        long_bundle = self._bundle("BSE_INTRADAY_LONG")
+        short_bundle = self._bundle("BSE_INTRADAY_SHORT")
+        # Mean-reversion setups must be stretched away from session VWAP in the
+        # direction opposite the intended trade: LONG below VWAP, SHORT above VWAP.
+        long_bundle.frame["vwap_distance_pct"] = -0.4
+        short_bundle.frame["vwap_distance_pct"] = 0.4
+        long_mask = primary_signal_mask(long_bundle, signal_family=SIGNAL_MEAN_REVERSION)
+        short_mask = primary_signal_mask(short_bundle, signal_family=SIGNAL_MEAN_REVERSION)
         self.assertTrue(long_mask.all())
         self.assertTrue(short_mask.all())
 
