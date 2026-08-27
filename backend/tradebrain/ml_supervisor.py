@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from backend.tradebrain.ml_cpcv import evaluate_cpcv_candidate
+from backend.tradebrain.ml_distribution_drift import build_psi_baseline
 from backend.tradebrain.ml_labels import (
     TASK_INTRADAY_LONG,
     TASK_INTRADAY_SHORT,
@@ -25,13 +26,16 @@ from backend.tradebrain.ml_labels import (
     build_labeled_dataset,
 )
 from backend.tradebrain.ml_optimizer import OptimizerConfig, optimize_labeled_dataset, serializable_result
+from backend.tradebrain.ml_pbo import evaluate_pbo_from_optimizer
 from backend.tradebrain.ml_promotion import evaluate_historical_promotion
 from backend.tradebrain.ml_registry import mark_historical_pass, register_optimization, registry_root
-from backend.tradebrain.ml_validation import DEFAULT_CHRONOLOGY
+from backend.tradebrain.ml_research_ledger import record_trials
+from backend.tradebrain.ml_selection_bias import evaluate_dsr_from_optimizer, multiple_testing_clearance
+from backend.tradebrain.ml_validation import DEFAULT_CHRONOLOGY, chronological_split
 from backend.tradebrain.schedule import get_operating_mode
 
 IST = ZoneInfo("Asia/Kolkata")
-METHOD_VERSION = "BSE_ML_SUPERVISOR_V1"
+METHOD_VERSION = "BSE_ML_SUPERVISOR_V2"
 TASK_ORDER = (TASK_INTRADAY_LONG, TASK_INTRADAY_SHORT, TASK_SWING_LONG_MTF)
 ALLOWED_TRAINING_MODES = {"POST_MARKET_STUDY", "STUDY_REPLAY"}
 
@@ -133,6 +137,53 @@ def _cpcv_evidence(bundle, optimization) -> dict[str, Any]:
         }
 
 
+def _psi_baseline(bundle, optimization) -> dict[str, Any]:
+    if not optimization.feature_columns:
+        return {}
+    split = chronological_split(bundle.frame, chronology=DEFAULT_CHRONOLOGY)
+    discovery = pd.concat([split["TRAIN"], split["VALIDATION"]], ignore_index=True)
+    if discovery.empty:
+        return {}
+    return build_psi_baseline(discovery, optimization.feature_columns)
+
+
+def _selection_bias_evidence(bundle, optimization, ledger_summary: dict[str, Any]) -> dict[str, Any]:
+    if not optimization.winner:
+        return multiple_testing_clearance(dsr=None, pbo=None)
+    dsr = evaluate_dsr_from_optimizer(
+        optimization,
+        cumulative_candidate_count=int(ledger_summary.get("distinct_candidate_configurations") or 0),
+        cumulative_trial_sharpes=ledger_summary.get("validation_trade_sharpes") or [],
+    )
+    if optimization.status == "OOS_PASS":
+        try:
+            pbo = evaluate_pbo_from_optimizer(bundle, optimization)
+        except Exception as exc:
+            pbo = {
+                "passed": False,
+                "verdict": "PBO_FAILED_SAFE",
+                "error": f"{type(exc).__name__}:{str(exc)[:500]}",
+                "oos_used": False,
+                "holdout_used": False,
+                "automatic_promotion": False,
+                "advisory_only": True,
+                "trade_authorization": False,
+                "order_execution_allowed": False,
+            }
+    else:
+        pbo = {
+            "passed": False,
+            "verdict": "PBO_NOT_RUN_NO_OOS_PASS",
+            "oos_used": False,
+            "holdout_used": False,
+            "automatic_promotion": False,
+            "advisory_only": True,
+            "trade_authorization": False,
+            "order_execution_allowed": False,
+        }
+    return multiple_testing_clearance(dsr=dsr, pbo=pbo)
+
+
 def run_ml_research_cycle(
     series_id: str,
     *,
@@ -145,6 +196,7 @@ def run_ml_research_cycle(
     code_version: str | None = None,
     state_path: str | Path | None = None,
     registry_path: str | Path | None = None,
+    research_ledger_path: str | Path | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any]:
     current = now or datetime.now(IST)
@@ -204,9 +256,23 @@ def run_ml_research_cycle(
                 db_path=db_path,
             )
             optimization = optimize_labeled_dataset(bundle, config=config)
-            serial = serializable_result(optimization)
-            promotion_quality = evaluate_historical_promotion(optimization)
+            ledger_summary = record_trials(
+                task=task,
+                trials=optimization.trials,
+                dataset_snapshot_hash=bundle.metadata.get("dataset_snapshot_hash"),
+                code_version=version,
+                architecture="BASELINE_OPTIMIZER",
+                path=research_ledger_path,
+            )
+            if optimization.winner:
+                optimization.metadata["psi_baseline"] = _psi_baseline(bundle, optimization)
+            multiple_testing = _selection_bias_evidence(bundle, optimization, ledger_summary)
+            promotion_quality = evaluate_historical_promotion(
+                optimization,
+                multiple_testing_evidence=multiple_testing,
+            )
             cpcv = _cpcv_evidence(bundle, optimization)
+            serial = serializable_result(optimization)
             registered = None
             if optimization.status == "OOS_PASS":
                 registered = register_optimization(
@@ -218,16 +284,20 @@ def run_ml_research_cycle(
                     registered.get("historical_walk_forward_pass")
                     and promotion_quality.get("passed")
                     and cpcv.get("passed")
+                    and multiple_testing.get("passed")
                 ):
                     registered = mark_historical_pass(
                         registered["model_id"],
                         promotion_quality=promotion_quality,
                         cpcv_robustness=cpcv,
+                        multiple_testing_evidence=multiple_testing,
                         root=registry_path,
                     )
             record = {
                 **serial,
                 "dataset_metadata": bundle.metadata,
+                "research_ledger": ledger_summary,
+                "multiple_testing_evidence": multiple_testing,
                 "promotion_quality": promotion_quality,
                 "cpcv_robustness": cpcv,
                 "registered_model": registered,
@@ -247,6 +317,12 @@ def run_ml_research_cycle(
                 "dataset_rows": int(len(bundle.frame)),
                 "dataset_snapshot_hash": bundle.metadata.get("dataset_snapshot_hash"),
                 "trial_count": len(optimization.trials),
+                "research_candidate_count": ledger_summary.get("distinct_candidate_configurations"),
+                "research_hypothesis_family_count": ledger_summary.get("distinct_hypothesis_families"),
+                "research_budget_exhausted": bool(ledger_summary.get("research_budget_exhausted")),
+                "multiple_testing_verdict": multiple_testing.get("verdict"),
+                "dsr_verdict": ((multiple_testing.get("dsr") or {}).get("verdict")),
+                "pbo_verdict": ((multiple_testing.get("pbo") or {}).get("verdict")),
                 "promotion_quality_verdict": promotion_quality.get("verdict"),
                 "promotion_quality_failures": promotion_quality.get("failures") or [],
                 "cpcv_verdict": cpcv.get("verdict"),
@@ -303,6 +379,7 @@ def run_ml_research_cycle(
             "model_auto_promoted_to_champion": False,
             "human_review_required_for_freeze": True,
             "human_review_required_for_advisory_integration": True,
+            "multiple_testing_clearance_required": True,
         },
         "advisory_only": True,
         "trade_authorization": False,
