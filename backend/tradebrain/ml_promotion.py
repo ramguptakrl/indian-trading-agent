@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 
-METHOD_VERSION = "BSE_ML_PROMOTION_V2"
+METHOD_VERSION = "BSE_ML_PROMOTION_V3"
 
 
 @dataclass(frozen=True)
@@ -59,12 +59,14 @@ def evaluate_historical_promotion(
     *,
     thresholds: PromotionThresholds = DEFAULT_PROMOTION_THRESHOLDS,
     multiple_testing_evidence: dict[str, Any] | None = None,
+    bootstrap_confidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a fail-closed verdict for historical promotion quality.
 
     The final configured holdout is intentionally absent from this function. A holdout that
     has already been inspected remains evidence, but can never be used to relax or tune these
-    gates. Researcher-selection-bias evidence (DSR + PBO) is also mandatory.
+    gates. Researcher-selection-bias evidence (DSR + PBO) and stationary-bootstrap uncertainty
+    evidence are mandatory.
     """
 
     thresholds.validate()
@@ -86,6 +88,13 @@ def evaluate_historical_promotion(
         failures.append("MULTIPLE_TESTING_EVIDENCE_MISSING")
     elif not bool(multiple_testing.get("passed")):
         failures.append("MULTIPLE_TESTING_CLEARANCE_REJECTED")
+
+    bootstrap = dict(bootstrap_confidence or {})
+    checks["bootstrap_confidence"] = bootstrap or None
+    if not bootstrap:
+        failures.append("BOOTSTRAP_CONFIDENCE_EVIDENCE_MISSING")
+    elif not bool(bootstrap.get("passed")):
+        failures.append("BOOTSTRAP_CONFIDENCE_REJECTED")
 
     trades = int(_number(normal, "trades", 0.0))
     checks["oos_trades"] = trades
@@ -157,6 +166,7 @@ def evaluate_historical_promotion(
         "checks": checks,
         "thresholds": asdict(thresholds),
         "multiple_testing_required": True,
+        "bootstrap_confidence_required": True,
         "holdout_used_for_threshold_tuning": False,
         "automatic_promotion": False,
         "human_review_still_required": True,
