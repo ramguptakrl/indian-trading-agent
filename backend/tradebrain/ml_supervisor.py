@@ -17,6 +17,11 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from backend.tradebrain.ml_bootstrap_confidence import (
+    bootstrap_promotion_verdict,
+    selected_returns_from_probabilities,
+    stationary_bootstrap_confidence,
+)
 from backend.tradebrain.ml_cpcv import evaluate_cpcv_candidate
 from backend.tradebrain.ml_distribution_drift import build_psi_baseline
 from backend.tradebrain.ml_labels import (
@@ -25,6 +30,7 @@ from backend.tradebrain.ml_labels import (
     TASK_SWING_LONG_MTF,
     build_labeled_dataset,
 )
+from backend.tradebrain.ml_models import predict_positive_probability
 from backend.tradebrain.ml_optimizer import OptimizerConfig, optimize_labeled_dataset, serializable_result
 from backend.tradebrain.ml_pbo import evaluate_pbo_from_optimizer
 from backend.tradebrain.ml_promotion import evaluate_historical_promotion
@@ -35,7 +41,7 @@ from backend.tradebrain.ml_validation import DEFAULT_CHRONOLOGY, chronological_s
 from backend.tradebrain.schedule import get_operating_mode
 
 IST = ZoneInfo("Asia/Kolkata")
-METHOD_VERSION = "BSE_ML_SUPERVISOR_V2"
+METHOD_VERSION = "BSE_ML_SUPERVISOR_V3"
 TASK_ORDER = (TASK_INTRADAY_LONG, TASK_INTRADAY_SHORT, TASK_SWING_LONG_MTF)
 ALLOWED_TRAINING_MODES = {"POST_MARKET_STUDY", "STUDY_REPLAY"}
 
@@ -184,6 +190,42 @@ def _selection_bias_evidence(bundle, optimization, ledger_summary: dict[str, Any
     return multiple_testing_clearance(dsr=dsr, pbo=pbo)
 
 
+def _bootstrap_evidence(bundle, optimization) -> dict[str, Any]:
+    if optimization.status != "OOS_PASS" or not optimization.winner or optimization.model is None:
+        return {
+            "passed": False,
+            "verdict": "BOOTSTRAP_NOT_RUN_NO_OOS_PASS",
+            "advisory_only": True,
+            "trade_authorization": False,
+            "order_execution_allowed": False,
+        }
+    try:
+        split = chronological_split(bundle.frame, chronology=DEFAULT_CHRONOLOGY)
+        oos = split["OOS"]
+        probabilities = predict_positive_probability(
+            optimization.model,
+            oos,
+            feature_columns=optimization.feature_columns,
+        )
+        returns = selected_returns_from_probabilities(
+            oos,
+            probabilities,
+            threshold=float(optimization.winner.get("threshold")),
+            friction_multiplier=2.0,
+        )
+        report = stationary_bootstrap_confidence(returns)
+        return bootstrap_promotion_verdict(report)
+    except Exception as exc:
+        return {
+            "passed": False,
+            "verdict": "BOOTSTRAP_FAILED_SAFE",
+            "error": f"{type(exc).__name__}:{str(exc)[:500]}",
+            "advisory_only": True,
+            "trade_authorization": False,
+            "order_execution_allowed": False,
+        }
+
+
 def run_ml_research_cycle(
     series_id: str,
     *,
@@ -267,9 +309,11 @@ def run_ml_research_cycle(
             if optimization.winner:
                 optimization.metadata["psi_baseline"] = _psi_baseline(bundle, optimization)
             multiple_testing = _selection_bias_evidence(bundle, optimization, ledger_summary)
+            bootstrap_confidence = _bootstrap_evidence(bundle, optimization)
             promotion_quality = evaluate_historical_promotion(
                 optimization,
                 multiple_testing_evidence=multiple_testing,
+                bootstrap_confidence=bootstrap_confidence,
             )
             cpcv = _cpcv_evidence(bundle, optimization)
             serial = serializable_result(optimization)
@@ -285,12 +329,14 @@ def run_ml_research_cycle(
                     and promotion_quality.get("passed")
                     and cpcv.get("passed")
                     and multiple_testing.get("passed")
+                    and bootstrap_confidence.get("passed")
                 ):
                     registered = mark_historical_pass(
                         registered["model_id"],
                         promotion_quality=promotion_quality,
                         cpcv_robustness=cpcv,
                         multiple_testing_evidence=multiple_testing,
+                        bootstrap_confidence=bootstrap_confidence,
                         root=registry_path,
                     )
             record = {
@@ -298,6 +344,7 @@ def run_ml_research_cycle(
                 "dataset_metadata": bundle.metadata,
                 "research_ledger": ledger_summary,
                 "multiple_testing_evidence": multiple_testing,
+                "bootstrap_confidence": bootstrap_confidence,
                 "promotion_quality": promotion_quality,
                 "cpcv_robustness": cpcv,
                 "registered_model": registered,
@@ -323,6 +370,7 @@ def run_ml_research_cycle(
                 "multiple_testing_verdict": multiple_testing.get("verdict"),
                 "dsr_verdict": ((multiple_testing.get("dsr") or {}).get("verdict")),
                 "pbo_verdict": ((multiple_testing.get("pbo") or {}).get("verdict")),
+                "bootstrap_confidence_verdict": bootstrap_confidence.get("verdict"),
                 "promotion_quality_verdict": promotion_quality.get("verdict"),
                 "promotion_quality_failures": promotion_quality.get("failures") or [],
                 "cpcv_verdict": cpcv.get("verdict"),
@@ -380,6 +428,7 @@ def run_ml_research_cycle(
             "human_review_required_for_freeze": True,
             "human_review_required_for_advisory_integration": True,
             "multiple_testing_clearance_required": True,
+            "bootstrap_confidence_required": True,
         },
         "advisory_only": True,
         "trade_authorization": False,
