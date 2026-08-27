@@ -8,6 +8,8 @@
 
 **Last fully certified statistical-governance boundary:** `5700f2e8282583ef7f9acb87a5641a4ccf23d379`
 
+**GitHub Wiki initialized:** 2026-08-26. Managed source pages live in `docs/wiki/` and are mirrored to the repository Wiki by `Sync Trade Brain Wiki`.
+
 **Status rule:** A newer commit is **not** called green merely because an older boundary passed CI. New code must receive exact-head certification.
 
 ## Navigation
