@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Run Trade Brain after-market evidence refresh plus bounded v0.14 ML research.
+"""Run Trade Brain after-market evidence refresh plus adaptive v0.14 ML research.
 
 The normal BSE study is authoritative. ML research is additive and fail-safe: a skipped,
 insufficient, or failed ML cycle never converts a successful audited BSE study into failure.
+Tasks without an active model may use bounded discovery cadence; tasks with a frozen/shadow
+model are retrained only when drift/degradation recommends a separate research challenger.
 """
 from __future__ import annotations
 
@@ -22,7 +24,7 @@ load_dotenv(ROOT / ".env", override=True)
 
 from backend.tradebrain.kite_data import KITE_SOURCE_KEY
 from backend.tradebrain.market_data_store import find_series
-from backend.tradebrain.ml_supervisor import run_ml_research_cycle
+from backend.tradebrain.ml_adaptive_cycle import run_adaptive_ml_cycle
 from backend.tradebrain.study_cycle_v2 import run_after_market_study_v2
 from scripts.tradebrain_after_market_study import _acquire_supervisor_lock, _print_result, _reload_env
 
@@ -46,12 +48,11 @@ def _attach_ml(result: dict, *, deep: bool, cadence_days: int, disabled: bool) -
         }
         return result
     try:
-        ml = run_ml_research_cycle(
+        ml = run_adaptive_ml_cycle(
             str(series_id),
             as_of=result.get("now_ist"),
             deep_search=bool(deep),
             cadence_days=max(1, int(cadence_days)),
-            force=False,
             code_version=os.getenv("TRADEBRAIN_CODE_VERSION") or "LOCAL_AFTER_MARKET",
         )
     except Exception as exc:
@@ -74,16 +75,17 @@ def _print_combined(result: dict) -> None:
     if ml:
         print(json.dumps({
             "ml_status": ml.get("status"),
-            "ml_run_id": ml.get("run_id"),
-            "ml_deep_search": ml.get("deep_search"),
-            "ml_tasks": ml.get("tasks"),
+            "ml_method_version": ml.get("method_version"),
+            "ml_discovery_tasks": ml.get("discovery_tasks"),
+            "ml_drift_triggered_tasks": ml.get("drift_triggered_tasks"),
+            "ml_active_models": ml.get("active_models"),
             "ml_order_execution_allowed": False,
         }, ensure_ascii=False, default=str))
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Trade Brain after-market BSE study + ML research loop")
-    parser.add_argument("--force", action="store_true", help="Force the base evidence study now; ML remains schedule-safe unless run via the dedicated optimizer script")
+    parser = argparse.ArgumentParser(description="Trade Brain after-market BSE study + adaptive ML research loop")
+    parser.add_argument("--force", action="store_true", help="Force the base evidence study now; ML remains after-market and policy-safe")
     parser.add_argument("--loop", action="store_true", help="Keep checking and run at most once per IST study date")
     parser.add_argument("--poll-seconds", type=int, default=900, help="Loop check interval; minimum 60 seconds")
     parser.add_argument("--bootstrap-daily-days", type=int, default=3650)
@@ -91,8 +93,8 @@ def main() -> int:
     parser.add_argument("--bootstrap-15m-days", type=int, default=1825)
     parser.add_argument("--bootstrap-60m-days", type=int, default=1825)
     parser.add_argument("--incremental-days", type=int, default=14)
-    parser.add_argument("--ml-deep", action="store_true", help="Use the broader controlled ML search when the cadence is due")
-    parser.add_argument("--ml-cadence-days", type=int, default=7, help="Minimum days between automatic ML research runs")
+    parser.add_argument("--ml-deep", action="store_true", help="Use the broader controlled search when discovery/retraining research is actually due")
+    parser.add_argument("--ml-cadence-days", type=int, default=7, help="Minimum days between bounded discovery runs for tasks that have no active model")
     parser.add_argument("--skip-ml", action="store_true", help="Run evidence study without the ML research supervisor")
     args = parser.parse_args()
     if args.poll_seconds < 60:
@@ -115,7 +117,8 @@ def main() -> int:
             "pid": os.getpid(),
             "lock_path": str(lock_path),
             "poll_seconds": args.poll_seconds,
-            "ml_cadence_days": args.ml_cadence_days,
+            "ml_discovery_cadence_days": args.ml_cadence_days,
+            "active_model_retraining_policy": "DRIFT_TRIGGERED_AFTER_MARKET_ONLY",
             "order_execution_allowed": False,
         }))
         sys.stdout.flush()
