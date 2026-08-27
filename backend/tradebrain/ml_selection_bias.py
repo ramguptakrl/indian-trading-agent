@@ -1,15 +1,15 @@
 """Researcher-selection-bias evidence for Trade Brain v0.14 ML.
 
 DSR uses only validation-period candidate metrics plus the persistent research ledger's
-cumulative candidate count. OOS and holdout are intentionally excluded from DSR construction.
-PBO is a separate CPCV matrix diagnostic; both are required before this module can declare the
-multiple-testing layer cleared.
+cumulative candidate distribution. OOS and holdout are intentionally excluded from DSR
+construction. PBO is a separate CPCV matrix diagnostic; both are required before this module
+can declare the multiple-testing layer cleared.
 """
 from __future__ import annotations
 
 from math import sqrt
 from statistics import NormalDist
-from typing import Any
+from typing import Any, Iterable
 
 import numpy as np
 
@@ -18,7 +18,7 @@ from backend.tradebrain.ml_multiple_testing import (
     expected_max_sharpe,
 )
 
-METHOD_VERSION = "BSE_ML_SELECTION_BIAS_V1"
+METHOD_VERSION = "BSE_ML_SELECTION_BIAS_V2"
 _NORMAL = NormalDist()
 
 
@@ -35,16 +35,31 @@ def _finite_trial_sharpes(trials: list[dict[str, Any]]) -> list[float]:
     return values
 
 
+def _finite_values(values: Iterable[float] | None) -> list[float]:
+    output: list[float] = []
+    for value in values or ():
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(parsed):
+            output.append(parsed)
+    return output
+
+
 def evaluate_dsr_from_optimizer(
     result: Any,
     *,
     cumulative_candidate_count: int,
+    cumulative_trial_sharpes: Iterable[float] | None = None,
 ) -> dict[str, Any]:
-    """Compute DSR from validation-only trial metrics stored by the optimizer."""
+    """Compute DSR from validation-only optimizer metrics and the persistent ledger."""
     winner = getattr(result, "winner", None) or {}
     validation = winner.get("validation") or {}
     trials = list(getattr(result, "trials", None) or [])
-    trial_sharpes = _finite_trial_sharpes(trials)
+    current_sharpes = _finite_trial_sharpes(trials)
+    ledger_sharpes = _finite_values(cumulative_trial_sharpes)
+    null_sharpes = ledger_sharpes if len(ledger_sharpes) >= 2 else current_sharpes
 
     try:
         n = int(validation.get("trades") or 0)
@@ -54,8 +69,8 @@ def evaluate_dsr_from_optimizer(
     except (TypeError, ValueError):
         n, sr, skew, kurt = 0, 0.0, 0.0, 3.0
 
-    effective_trials = max(int(cumulative_candidate_count), len(trial_sharpes), 1)
-    null = expected_max_sharpe(trial_sharpes, effective_trials=effective_trials)
+    effective_trials = max(int(cumulative_candidate_count), len(null_sharpes), 1)
+    null = expected_max_sharpe(null_sharpes, effective_trials=effective_trials)
     benchmark = float(null["expected_max_sharpe_under_null"])
     denominator_term = 1.0 - skew * sr + ((kurt - 1.0) / 4.0) * sr * sr
     if n < 2 or denominator_term <= 0.0:
@@ -66,7 +81,7 @@ def evaluate_dsr_from_optimizer(
         probability = float(_NORMAL.cdf(z_score))
 
     threshold = DEFAULT_MULTIPLE_TESTING_THRESHOLDS
-    sufficient = n >= threshold.min_returns_for_dsr and len(trial_sharpes) >= 2
+    sufficient = n >= threshold.min_returns_for_dsr and len(null_sharpes) >= 2
     passed = bool(sufficient and probability >= threshold.min_dsr_probability)
     return {
         "method_version": METHOD_VERSION,
@@ -82,8 +97,10 @@ def evaluate_dsr_from_optimizer(
         "minimum_probability": threshold.min_dsr_probability,
         "z_score": z_score,
         "multiple_trial_null": null,
-        "current_run_trial_sharpes": len(trial_sharpes),
+        "current_run_trial_sharpes": len(current_sharpes),
+        "cumulative_trial_sharpes": len(ledger_sharpes),
         "cumulative_candidate_count": effective_trials,
+        "null_distribution_source": "PERSISTENT_LEDGER" if len(ledger_sharpes) >= 2 else "CURRENT_RUN_FALLBACK",
         "selection_period": "VALIDATION_ONLY",
         "oos_used": False,
         "holdout_used": False,
