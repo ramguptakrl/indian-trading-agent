@@ -124,7 +124,20 @@ class MLOptimizerSafetyTests(unittest.TestCase):
                     root=tmp,
                 )
 
-            historical = mark_historical_pass(metadata["model_id"], root=tmp)
+            with self.assertRaises(ValueError):
+                mark_historical_pass(
+                    metadata["model_id"],
+                    promotion_quality={"passed": False},
+                    cpcv_robustness={"passed": True},
+                    root=tmp,
+                )
+
+            historical = mark_historical_pass(
+                metadata["model_id"],
+                promotion_quality={"passed": True},
+                cpcv_robustness={"passed": True},
+                root=tmp,
+            )
             self.assertEqual(historical["stage"], STAGE_HISTORICAL_PASS)
             with self.assertRaises(PermissionError):
                 freeze_challenger(
@@ -152,6 +165,8 @@ class MLOptimizerSafetyTests(unittest.TestCase):
             )
             self.assertEqual(evidence["model_status"], STAGE_SHADOW)
             self.assertTrue(evidence["shadow_only"])
+            self.assertTrue(evidence["model_sha256"])
+            self.assertTrue(evidence["shadow_session_ist"])
             self.assertFalse(evidence["advisory_weight_applied"])
             self.assertFalse(evidence["trade_authorization"])
             self.assertFalse(evidence["order_execution_allowed"])
