@@ -148,6 +148,18 @@ def worst_losing_streak(returns_pct: Iterable[float]) -> int:
     return worst
 
 
+def _return_moments(returns: np.ndarray) -> tuple[float, float]:
+    if len(returns) < 3:
+        return 0.0, 3.0
+    centered = returns - float(np.mean(returns))
+    m2 = float(np.mean(centered ** 2))
+    if m2 <= 0.0:
+        return 0.0, 3.0
+    skew = float(np.mean(centered ** 3) / (m2 ** 1.5))
+    kurt = float(np.mean(centered ** 4) / (m2 ** 2))
+    return skew, max(kurt, 1.0)
+
+
 def trading_metrics(
     frame: pd.DataFrame,
     probabilities: np.ndarray,
@@ -169,6 +181,7 @@ def trading_metrics(
     profit_factor = gross_profit / gross_loss if gross_loss > 0.0 else (999.0 if gross_profit > 0.0 else 0.0)
     return_std = float(np.std(returns, ddof=1)) if len(returns) > 1 else 0.0
     trade_sharpe = float(np.mean(returns) / return_std) if return_std > 0.0 else 0.0
+    return_skewness, return_kurtosis = _return_moments(returns)
     years = pd.to_datetime(selected_frame["ts_close"], utc=True).dt.year if len(selected_frame) else pd.Series(dtype=int)
     year_expectancy = {}
     for year in sorted(set(years.tolist())):
@@ -197,6 +210,8 @@ def trading_metrics(
         "median_net_return_pct": float(np.median(returns)) if len(returns) else 0.0,
         "std_net_return_pct": return_std,
         "trade_sharpe": trade_sharpe,
+        "return_skewness": return_skewness,
+        "return_kurtosis": return_kurtosis,
         "sum_net_return_pct": float(np.sum(returns)) if len(returns) else 0.0,
         "profit_factor": float(profit_factor),
         "max_drawdown_pct": max_drawdown_from_returns(returns),
