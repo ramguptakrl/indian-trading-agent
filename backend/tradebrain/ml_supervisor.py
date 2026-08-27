@@ -22,6 +22,7 @@ from backend.tradebrain.ml_labels import (
     build_labeled_dataset,
 )
 from backend.tradebrain.ml_optimizer import OptimizerConfig, optimize_labeled_dataset, serializable_result
+from backend.tradebrain.ml_promotion import evaluate_historical_promotion
 from backend.tradebrain.ml_registry import mark_historical_pass, register_optimization, registry_root
 from backend.tradebrain.schedule import get_operating_mode
 
@@ -164,6 +165,7 @@ def run_ml_research_cycle(
             )
             optimization = optimize_labeled_dataset(bundle, config=config)
             serial = serializable_result(optimization)
+            promotion_quality = evaluate_historical_promotion(optimization)
             registered = None
             if optimization.status == "OOS_PASS":
                 registered = register_optimization(
@@ -171,7 +173,7 @@ def run_ml_research_cycle(
                     code_version=version,
                     root=registry_path,
                 )
-                if registered.get("historical_walk_forward_pass"):
+                if registered.get("historical_walk_forward_pass") and promotion_quality.get("passed"):
                     registered = mark_historical_pass(
                         registered["model_id"],
                         root=registry_path,
@@ -179,6 +181,7 @@ def run_ml_research_cycle(
             record = {
                 **serial,
                 "dataset_metadata": bundle.metadata,
+                "promotion_quality": promotion_quality,
                 "registered_model": registered,
                 "run_id": run_id,
                 "supervisor_method_version": METHOD_VERSION,
@@ -196,6 +199,8 @@ def run_ml_research_cycle(
                 "dataset_rows": int(len(bundle.frame)),
                 "dataset_snapshot_hash": bundle.metadata.get("dataset_snapshot_hash"),
                 "trial_count": len(optimization.trials),
+                "promotion_quality_verdict": promotion_quality.get("verdict"),
+                "promotion_quality_failures": promotion_quality.get("failures") or [],
                 "registered_model_id": (registered or {}).get("model_id"),
                 "registered_stage": (registered or {}).get("stage"),
                 "artifact_path": artifact_path,
