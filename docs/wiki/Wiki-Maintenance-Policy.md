@@ -122,3 +122,9 @@ This gives us:
 - a recoverable canonical copy even if Wiki content is edited or lost.
 
 If the actual GitHub Wiki has never had its first page initialized, GitHub may require a one-time initial page creation before the `.wiki.git` repository can be cloned/pushed. After that, the sync workflow is the normal maintenance path.
+
+### Verified operational status
+
+The real GitHub Wiki repository was initialized and automatic synchronization was verified on 2026-08-26. Workflow run `33029999638` cloned `indian-trading-agent.wiki.git`, committed all eight managed pages as Wiki commit `9cc32d6`, and pushed successfully to the Wiki `master` branch.
+
+From this point forward, meaningful changes to `docs/wiki/**` on `tradebrain/reframe-foundation` automatically trigger `Sync Trade Brain Wiki`. The workflow manages only the declared Trade Brain pages and does not delete unrelated Wiki pages.
