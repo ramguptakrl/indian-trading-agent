@@ -16,16 +16,20 @@ interface Props {
 }
 
 const availableAnalysts = [
-  { value: "market", label: "Market", description: "Technical indicators (RSI, MACD, Bollinger)" },
-  { value: "social", label: "Social", description: "Social media sentiment" },
-  { value: "news", label: "News", description: "Indian + global market news" },
-  { value: "fundamentals", label: "Fundamentals", description: "P&L, balance sheet, cash flow" },
+  { value: "market", label: "Price & Structure", description: "BSE trend, levels, volume, volatility" },
+  { value: "news", label: "BSE Context", description: "Company, exchange, regulatory and market context" },
+  { value: "fundamentals", label: "Fundamentals", description: "BSE business and financial evidence" },
+  {
+    value: "social",
+    label: "Social (experimental)",
+    description: "Optional public-sentiment evidence; not part of the default BSE team",
+  },
 ];
 
 const depthOptions = [
-  { value: 1, label: "Shallow", description: "1 debate round · fastest · cheapest", estCost: "~Rs.15-25", estTime: "~1-2 min" },
-  { value: 2, label: "Medium", description: "2 debate rounds · balanced", estCost: "~Rs.25-40", estTime: "~2-4 min" },
-  { value: 3, label: "Deep", description: "3 debate rounds · most thorough", estCost: "~Rs.40-60", estTime: "~4-6 min" },
+  { value: 1, label: "Shallow", description: "1 debate round · recommended · lowest model usage" },
+  { value: 2, label: "Medium", description: "2 debate rounds · roughly doubles debate calls" },
+  { value: 3, label: "Deep", description: "3 debate rounds · benchmark mode · highest quota use" },
 ];
 
 const languages = [
@@ -52,12 +56,6 @@ export function AnalysisOptions({
     }
   };
 
-  // Estimate cost based on analyst count and depth
-  const baseCostPerAnalyst = 4; // Rs per analyst
-  const debateCost = 6 * depth; // Rs per debate round
-  const fixedCost = 10; // trader + portfolio manager
-  const estCost = Math.round(baseCostPerAnalyst * analysts.length + debateCost + fixedCost);
-
   return (
     <Card>
       <button
@@ -68,22 +66,19 @@ export function AnalysisOptions({
       >
         <div className="flex items-center gap-2">
           <Settings2 className="h-4 w-4 text-muted-foreground" />
-          <span className="font-medium text-sm">Customize Analysis</span>
+          <span className="font-medium text-sm">Customize BSE Research</span>
           <Badge variant="outline" className="text-xs">
             {analysts.length} agents · Depth {depth} · {language}
           </Badge>
-          <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-200">
-            ~Rs.{estCost}
-          </Badge>
+          {depth === 1 && <Badge variant="secondary" className="text-[10px]">RECOMMENDED</Badge>}
         </div>
         {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
       </button>
 
       {expanded && (
         <CardContent className="space-y-4 pt-0">
-          {/* Analysts */}
           <div>
-            <label className="text-xs font-medium mb-2 block">Analysts (select which to run)</label>
+            <label className="text-xs font-medium mb-2 block">BSE research agents</label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {availableAnalysts.map((a) => {
                 const active = analysts.includes(a.value);
@@ -114,13 +109,12 @@ export function AnalysisOptions({
               })}
             </div>
             <p className="text-[10px] text-muted-foreground mt-1">
-              Fewer analysts = faster + cheaper. At least 1 is required.
+              More agents use more provider requests. Social sentiment stays optional until evidence proves it adds value for BSE Ltd.
             </p>
           </div>
 
-          {/* Research Depth */}
           <div>
-            <label className="text-xs font-medium mb-2 block">Research Depth (debate rounds)</label>
+            <label className="text-xs font-medium mb-2 block">Research depth</label>
             <div className="grid grid-cols-3 gap-2">
               {depthOptions.map((d) => (
                 <button
@@ -134,19 +128,25 @@ export function AnalysisOptions({
                       : "border-border hover:border-primary/30"
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
                     <span className="text-sm font-medium">{d.label}</span>
+                    {d.value === 1 && <Badge variant="secondary" className="text-[9px]">NORMAL USE</Badge>}
                   </div>
-                  <p className="text-[10px] text-muted-foreground">{d.description}</p>
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    {d.estCost} · {d.estTime}
-                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-1">{d.description}</p>
                 </button>
               ))}
             </div>
+            {depth > 1 ? (
+              <p className="text-[10px] text-amber-700 mt-2">
+                Higher depth repeats both investment and risk debates for each horizon. On free API tiers this can consume quota quickly; use Shallow for normal live analysis.
+              </p>
+            ) : (
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Shallow still runs the full analyst → Bull/Bear → Research Manager → Trader → Risk → Portfolio Manager chain; it only limits repeated debate rounds.
+              </p>
+            )}
           </div>
 
-          {/* Language */}
           <div>
             <label className="text-xs font-medium mb-2 block">Report Language</label>
             <div className="flex gap-2">
@@ -167,7 +167,7 @@ export function AnalysisOptions({
               ))}
             </div>
             <p className="text-[10px] text-muted-foreground mt-1">
-              Internal debates stay in English for quality. Only final reports use selected language.
+              Internal debates stay in English; user-facing reports use the selected language.
             </p>
           </div>
         </CardContent>

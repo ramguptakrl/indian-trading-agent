@@ -1,0 +1,139 @@
+TRADE BRAIN — PERMANENT SANITIZED LEARNING LOG
+================================================
+
+Purpose
+-------
+This repository file records durable, sanitized project learning checkpoints: experiments,
+validation results, engineering discoveries, rejected ideas, evidence-boundary decisions,
+and interpretation summaries that should survive individual local/runtime sessions.
+
+This file MUST NEVER contain API secrets, access tokens, request tokens, passwords, cookies,
+authorization headers, broker credentials, or hidden chain-of-thought.
+
+Runtime detail belongs in the append-only local TXT audit under:
+  %USERPROFILE%\.tradingagents\tradebrain\audit_txt\
+
+Product boundary
+----------------
+- Modeled trader: RESIDENT_INDIAN.
+- Active modes: INTRADAY and SWING.
+- Zerodha Kite role: MARKET_DATA_ONLY.
+- Automatic broker order execution: DISABLED.
+- Hard safety rules: protected; never auto-optimized.
+- Learning means evidence collection/replay/calibration, not autonomous LLM-weight training.
+- Challenger/soft-parameter promotion requires explicit human approval.
+
+2026-08-25 — Zerodha live-data operational validation
+------------------------------------------------------
+STATUS: PASSED
+
+Evidence:
+- Zerodha login flow successfully produced a request_token.
+- Direct documented session-token exchange succeeded once the complete API secret was
+  supplied locally.
+- Read-only REST validation returned NSE:BSE LTP = 3303 during the validation session.
+- Trade Brain's Kite MARKET_DATA_ONLY WebSocket process started successfully.
+- WebSocket log received NSE:BSE quote records with last_price = 3303.0 and source label
+  ZERODHA_KITE_WEBSOCKET_MARKET_DATA_ONLY.
+- order_api_enabled remained false.
+
+Engineering discovery:
+- Windows hidden/character-by-character secret prompts can truncate pasted secrets. Earlier
+  Invalid checksum failures were reproduced because the locally received secret length was
+  shorter than the actual secret. A normal local paste path with the complete 32-character
+  secret resolved the checksum exchange.
+- The http://127.0.0.1/ redirect was not the root cause; it worked for the manual
+  request-token-copy flow.
+- Redirected Python stdout needed unbuffered mode for immediate Kite sidecar logs.
+
+Interpretation:
+- Live broker market-data transport is operational.
+- This validates connectivity/authentication and read-only price transport only; it is not
+  a profitability claim and does not authorize broker execution.
+
+2026-08-25 — Automatic after-market study architecture
+------------------------------------------------------
+STATUS: IMPLEMENTATION STARTED
+
+Decision:
+- Use the current audited Phase-3/4/5 evidence plane rather than the legacy yfinance AI
+  backtester as the canonical automatic learning path.
+- Market hours remain live/read-only observation.
+- Post-market/non-trading study mode may refresh audited Kite historical data, replay
+  existing NSE:BSE plans, run exploratory evidence studies, and update the frozen
+  prospective BSE hypothesis.
+- Local runtime evidence and interpretation are appended to sanitized TXT audit files.
+- No automatic hard-rule mutation, no automatic soft-parameter promotion, and no order
+  endpoints are permitted.
+
+Implemented components:
+- backend/tradebrain/study_cycle.py
+- scripts/tradebrain_after_market_study.py
+- Study-TradeBrain.bat
+
+Initial bootstrap policy:
+- Daily Kite history: up to 3650 calendar days.
+- 5-minute Kite history: up to 1825 calendar days.
+- Subsequent refresh: rolling 14 calendar days.
+- Long ranges use the audited chunked Kite sync path and its conservative request limits.
+
+Interpretation:
+- "Training" in Trade Brain is now explicitly defined as accumulating falsifiable market
+  evidence, replay outcomes, and prospective observations. It does not fine-tune the LLM
+  or grant the model authority to rewrite protected trading policy.
+
+2026-08-25 — Deep Analysis provider wiring correction
+------------------------------------------------------
+STATUS: PASSED
+
+Evidence:
+- A live localhost Deep Analysis request reached the backend but surfaced an Anthropic
+  authentication failure because the repository default provider was still Anthropic.
+- Trade Brain's default LLM provider was changed to Google Gemini.
+- Default quick model is gemini-3.6-flash; default deep model is
+  gemini-3.1-pro-preview.
+- Groq was added as a first-class OpenAI-compatible provider using the local
+  GROQ_API_KEY credential and openai/gpt-oss-20b model option.
+- Settings > Models & Keys remains the local credential handoff point. Key status is
+  masked; raw API keys are not returned by the status API.
+- Missing cloud-provider credentials now fail with Trade Brain Settings guidance instead
+  of exposing a raw provider-SDK authentication error.
+- Foundation CI run 32871551701 passed the frontend build, all Trade Brain tests, and
+  Phase 2 through Phase 10 observational smokes.
+
+Interpretation:
+- The observed frontend-to-backend Deep Analysis path was connected; the failure was stale
+  provider selection/auth configuration rather than Kite or browser connectivity.
+- Gemini is now the default intelligence provider and Groq is available as an alternate.
+- Provider credentials remain local and do not alter Trade Brain's advisory-only or
+  Kite MARKET_DATA_ONLY safety boundaries.
+
+2026-08-25 — After-market Phase-1 identity bootstrap correction
+---------------------------------------------------------------
+STATUS: PASSED
+
+Observed failure:
+- A fresh local After Market Study process repeatedly stopped safely with
+  "Unknown NSE:BSE; refresh Phase 1 security master before creating audited market data."
+- The Phase-3 market-data store was correctly enforcing its identity boundary; the bug was
+  that the scheduler attempted Kite history before bootstrapping the local Phase-1 store.
+
+Correction:
+- The study cycle now checks the exact NSE:BSE listing before historical ingestion.
+- If the listing already exists, no security-master refresh is performed.
+- If it is missing, the official NSE equity security master is refreshed and NSE:BSE is
+  verified before Kite history can create an audited market series.
+- If the official refresh still does not resolve NSE:BSE, the study cycle fails closed.
+- Kite instrument identity is not used to bypass or invent Phase-1 identity.
+
+Validation:
+- Added regression coverage for existing identity reuse, one-time bootstrap when missing,
+  fail-closed behavior, and successful study continuation after identity verification.
+- Foundation CI run 32872123546 passed unit tests, frontend contract build, and all Phase
+  2 through Phase 10 observational smokes.
+
+Interpretation:
+- Fresh installations can now self-bootstrap the required NSE:BSE identity during the
+  automatic study cycle without a manual Phase-1 refresh step.
+- This changes bootstrap orchestration only. Advisory-only, Kite MARKET_DATA_ONLY, and
+  no-broker-order safety boundaries remain unchanged.

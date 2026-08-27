@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Open_Sans } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { MarketTimeBar } from "@/components/layout/MarketTimeBar";
 import { Toaster } from "sonner";
 
 const openSans = Open_Sans({
@@ -11,8 +12,8 @@ const openSans = Open_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Indian Trading Agent",
-  description: "AI-powered short-term trading decisions for NSE/BSE",
+  title: "Trade Brain — BSE Ltd",
+  description: "Advisory-only BSE Ltd research for NSE:BSE — INTRADAY + SWING",
 };
 
 export default function RootLayout({
@@ -21,13 +22,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${openSans.variable} h-full antialiased`}
-    >
+    <html lang="en" className={`${openSans.variable} h-full antialiased`}>
       <body className="min-h-full flex">
         <Sidebar />
         <main className="flex-1 ml-64 min-h-screen bg-background">
+          <MarketTimeBar />
           {children}
         </main>
         <Toaster position="bottom-right" />

@@ -1,21 +1,77 @@
-"""Analysis endpoints — run multi-agent analysis with WebSocket streaming."""
+"""Analysis endpoints — run multi-agent analysis with WebSocket streaming.
+
+Trade Brain hardening: the upstream multi-agent result is a research candidate, never
+an order signal. Final advisory state is persisted separately with deterministic
+validation metadata and an execution-disabled boundary.
+"""
 
 import asyncio
 import uuid
 import time
 import threading
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, BackgroundTasks
 from backend.models import AnalysisRequest, AnalysisResponse
 from backend.ws import manager
 from backend.db import save_analysis, get_analysis, get_analysis_history, update_analysis_pnl
+from backend.tradebrain.advisory_pipeline import evaluate_final_advisory, parse_agent_candidate
+from backend.tradebrain.advisory_store import get_final_advisory, save_final_advisory
+from backend.tradebrain.llm_failover import (
+    get_capacity_fallback_config,
+    is_retryable_llm_capacity_error,
+    public_capacity_error,
+)
+from backend.tradebrain.llm_verifier import verify_material_finding
 from pydantic import BaseModel as PydanticBaseModel
 from tradingagents.utils.ticker import normalize_ticker
 from tradingagents.default_config import DEFAULT_CONFIG
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
+IST = ZoneInfo("Asia/Kolkata")
 
 # In-memory task state
 _tasks: dict[str, dict] = {}
+
+
+def _analysis_advisory(ticker: str, trade_date: str, exchange: str, final_text: str) -> dict:
+    """Build a safe boundary for the general analysis endpoint.
+
+    Historical analysis requests contain a date but no decision timestamp, so we do not
+    invent an intraday clock for them. Current-date analysis is parsed and passed toward
+    the final pipeline, but still fails closed until explicit Crash Guard and broker
+    permission states are supplied through the Phase-10 final-advisory API.
+    """
+    parsed = parse_agent_candidate(final_text)
+    try:
+        requested_date = date.fromisoformat(trade_date)
+    except ValueError:
+        requested_date = None
+    today = datetime.now(IST).date()
+    if requested_date != today:
+        return {
+            "tradebrain_version": "0.11.0",
+            "ticker": ticker,
+            "exchange": exchange,
+            "analysis_trade_date": trade_date,
+            "ai_candidate": parsed,
+            "final_status": "HISTORICAL_RESEARCH_NOT_LIVE_GATE",
+            "reason": "Analysis supplied a historical/date-only context; no intraday decision timestamp was invented.",
+            "advisory_only": True,
+            "trade_authorization": False,
+            "order_execution_allowed": False,
+            "requires_phase10_final_gate_for_live_use": True,
+        }
+    return evaluate_final_advisory(
+        ticker=ticker,
+        exchange=exchange,
+        final_trade_decision=final_text,
+        evaluated_at=datetime.now(IST),
+        crash_guard=None,
+        broker_allows_trade=None,
+        require_verified_calendar=True,
+    )
 
 
 def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict, selected_analysts: list[str] = None):
@@ -25,34 +81,36 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
     from tradingagents.graph.propagation import Propagator
     from backend.stats_callback import StatsCallback
 
+    # BSE default team avoids a redundant generic social analyst. Price/structure,
+    # BSE/market news context and fundamentals are the default research inputs.
     if selected_analysts is None:
-        selected_analysts = ["market", "social", "news", "fundamentals"]
+        selected_analysts = ["market", "news", "fundamentals"]
 
     loop = asyncio.new_event_loop()
-
     start_time = time.time()
     _tasks[task_id]["status"] = "running"
     stats = StatsCallback()
 
-    try:
+    def execute_graph(current_config: dict):
+        """Execute one provider attempt and stream progress to the existing task."""
         ta = TradingAgentsGraph(
             selected_analysts=selected_analysts,
             debug=False,
-            config=config,
+            config=current_config,
             callbacks=[stats],
         )
 
-        # Stream the graph execution
-        propagator = Propagator(max_recur_limit=config.get("max_recur_limit", 100))
+        propagator = Propagator(max_recur_limit=current_config.get("max_recur_limit", 100))
         init_state = propagator.create_initial_state(ticker, trade_date)
         stream_args = propagator.get_graph_args()
 
         prev_reports = {}
         chunk_count = 0
+        final_chunk = None
 
         for chunk in ta.graph.stream(init_state, **stream_args):
+            final_chunk = chunk
             chunk_count += 1
-            # Heartbeat — let frontend know we're still alive
             last_message = ""
             if chunk.get("messages"):
                 msg = chunk["messages"][-1]
@@ -72,7 +130,6 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
                 "last_activity": last_message[:120],
             }))
 
-            # Detect report updates
             for field in ["market_report", "sentiment_report", "news_report",
                           "fundamentals_report", "investment_plan",
                           "trader_investment_plan", "final_trade_decision"]:
@@ -86,7 +143,6 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
                         "content": val,
                     }))
 
-            # Detect debate updates
             invest_state = chunk.get("investment_debate_state")
             if invest_state:
                 bull = invest_state.get("bull_history", "")
@@ -108,7 +164,6 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
                         "type": "report", "section": "investment_plan", "content": judge,
                     }))
 
-            # Detect risk debate updates
             risk_state = chunk.get("risk_debate_state")
             if risk_state:
                 for side in ["aggressive", "conservative", "neutral"]:
@@ -120,16 +175,100 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
                             "type": "risk_debate", "side": side, "content": val,
                         }))
 
-        # Get final state
-        final_state = chunk  # Last chunk is the final state
-        signal = ta.process_signal(final_state.get("final_trade_decision", ""))
+        if final_chunk is None:
+            raise RuntimeError("Analysis graph completed without producing a state")
+        return ta, final_chunk
+
+    try:
+        active_config = dict(config)
+        failover_used = False
+
+        try:
+            ta, final_state = execute_graph(active_config)
+        except Exception as primary_error:
+            if not is_retryable_llm_capacity_error(primary_error):
+                raise
+
+            fallback_config = get_capacity_fallback_config(active_config)
+            if fallback_config is None:
+                raise RuntimeError(
+                    public_capacity_error(primary_error, fallback_available=False)
+                ) from primary_error
+
+            failover_used = True
+            primary_provider = str(active_config.get("llm_provider") or "unknown")
+            fallback_provider = str(fallback_config.get("llm_provider") or "alternate")
+            message = (
+                f"{primary_provider.title()} quota/rate limit reached — automatically "
+                f"switching this analysis to {fallback_provider.title()}..."
+            )
+            print(f"[Analysis {task_id}] {message}", flush=True)
+            loop.run_until_complete(manager.send_event(task_id, {
+                "type": "heartbeat",
+                "chunk": 0,
+                "last_activity": message,
+                "provider_failover": True,
+                "from_provider": primary_provider,
+                "to_provider": fallback_provider,
+            }))
+
+            active_config = fallback_config
+            try:
+                ta, final_state = execute_graph(active_config)
+            except Exception as fallback_error:
+                if is_retryable_llm_capacity_error(fallback_error):
+                    raise RuntimeError(
+                        public_capacity_error(fallback_error, fallback_available=True)
+                    ) from fallback_error
+                raise RuntimeError(
+                    f"Automatic alternate-provider attempt could not complete the analysis: {str(fallback_error)[:500]}"
+                ) from fallback_error
+
+        final_text = final_state.get("final_trade_decision", "")
+        research_label = ta.process_signal(final_text)
+        active_provider = str(active_config.get("llm_provider") or "unknown").lower()
+
+        # Groq is the normal BSE research provider. Only material findings are sent to
+        # Gemini for an independent claim/evidence check; verifier failure never grants
+        # authority or overrides the deterministic Trade Brain gate.
+        material_verifier = verify_material_finding(
+            research_label=research_label,
+            final_trade_decision=final_text,
+            market_report=final_state.get("market_report"),
+            news_report=final_state.get("news_report"),
+            fundamentals_report=final_state.get("fundamentals_report"),
+            config=active_config,
+        )
+
+        exchange = str(active_config.get("default_exchange") or "NSE").upper()
+        tradebrain_advisory = _analysis_advisory(ticker, trade_date, exchange, final_text)
 
         duration = time.time() - start_time
         stats_summary = stats.summary()
+        # stats is persisted as JSON by the legacy analysis store, so verification remains
+        # available even though the old table has no dedicated verifier column yet.
+        stats_summary["material_verifier"] = material_verifier
 
-        # Send final events
+        if material_verifier.get("status") not in {"SKIPPED_NOT_MATERIAL", "UNAVAILABLE_NOT_CONFIGURED"}:
+            loop.run_until_complete(manager.send_event(task_id, {
+                "type": "verification",
+                "verification": material_verifier,
+                "trade_authorization": False,
+            }))
+
+        # Keep the legacy event type for frontend compatibility, but the value is now a
+        # non-authorizing research label and the explicit safety metadata travels with it.
         loop.run_until_complete(manager.send_event(task_id, {
-            "type": "signal", "decision": signal, "ticker": ticker,
+            "type": "signal",
+            "decision": research_label,
+            "research_label": research_label,
+            "ticker": ticker,
+            "trade_authorization": False,
+            "requires_tradebrain_gate": True,
+            "tradebrain_advisory": tradebrain_advisory,
+            "llm_provider": active_provider,
+            "llm_failover_used": failover_used,
+            "material_verifier": material_verifier,
         }))
         loop.run_until_complete(manager.send_event(task_id, {
             "type": "stats", **stats_summary,
@@ -138,23 +277,34 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
             "type": "complete",
             "duration_seconds": round(duration, 1),
             "stats": stats_summary,
+            "trade_authorization": False,
+            "llm_provider": active_provider,
+            "llm_failover_used": failover_used,
+            "material_verifier": material_verifier,
         }))
 
-        # Save to DB
         invest_state = final_state.get("investment_debate_state", {})
         risk_state = final_state.get("risk_debate_state", {})
 
         result_data = {
             "ticker": ticker,
             "trade_date": trade_date,
-            "signal": signal,
+            "signal": research_label,
+            "research_label": research_label,
+            "trade_authorization": False,
+            "order_execution_allowed": False,
+            "requires_tradebrain_gate": True,
+            "tradebrain_advisory": tradebrain_advisory,
+            "llm_provider": active_provider,
+            "llm_failover_used": failover_used,
+            "material_verifier": material_verifier,
             "market_report": final_state.get("market_report"),
             "sentiment_report": final_state.get("sentiment_report"),
             "news_report": final_state.get("news_report"),
             "fundamentals_report": final_state.get("fundamentals_report"),
             "investment_plan": final_state.get("investment_plan"),
             "trader_investment_plan": final_state.get("trader_investment_plan"),
-            "final_trade_decision": final_state.get("final_trade_decision"),
+            "final_trade_decision": final_text,
             "bull_history": invest_state.get("bull_history"),
             "bear_history": invest_state.get("bear_history"),
             "risk_aggressive_history": risk_state.get("aggressive_history"),
@@ -165,14 +315,21 @@ def _run_analysis_sync(task_id: str, ticker: str, trade_date: str, config: dict,
         }
 
         save_analysis(task_id, result_data)
+        save_final_advisory(task_id, tradebrain_advisory, research_label=research_label)
         _tasks[task_id]["status"] = "completed"
         _tasks[task_id]["result"] = result_data
 
     except Exception as e:
+        message = str(e)
+        if is_retryable_llm_capacity_error(e):
+            message = public_capacity_error(
+                e,
+                fallback_available=get_capacity_fallback_config(config) is not None,
+            )
         _tasks[task_id]["status"] = "error"
-        _tasks[task_id]["error"] = str(e)
+        _tasks[task_id]["error"] = message
         loop.run_until_complete(manager.send_event(task_id, {
-            "type": "error", "message": str(e),
+            "type": "error", "message": message,
         }))
     finally:
         loop.close()
@@ -217,7 +374,6 @@ async def analysis_websocket(websocket: WebSocket, task_id: str):
     await manager.connect(websocket, task_id)
     try:
         while True:
-            # Keep alive — wait for client messages or disconnection
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket, task_id)
@@ -225,53 +381,59 @@ async def analysis_websocket(websocket: WebSocket, task_id: str):
 
 @router.get("/{task_id}")
 def get_analysis_result(task_id: str):
-    """Get a completed analysis result."""
-    # Check in-memory first
+    """Get a completed analysis result with its persisted Trade Brain boundary."""
     if task_id in _tasks:
         task = _tasks[task_id]
         if task["status"] == "completed":
             return task.get("result", {})
         return {"task_id": task_id, "status": task["status"]}
 
-    # Check DB
     result = get_analysis(task_id)
     if result:
+        persisted = get_final_advisory(task_id)
+        result["research_label"] = result.get("signal") or "NO_TRADE"
+        result["trade_authorization"] = False
+        result["order_execution_allowed"] = False
+        result["requires_tradebrain_gate"] = True
+        result["tradebrain_advisory"] = persisted.get("advisory") if persisted else None
+        if isinstance(result.get("stats"), dict):
+            result["material_verifier"] = result["stats"].get("material_verifier")
         return result
     return {"error": "Analysis not found"}
 
 
 class PnLUpdate(PydanticBaseModel):
     entry_price: float
-    exit_price: float | None = None  # If None, trade is "open" — no exit yet
-    reflect: bool = False  # If True, feed P&L to agent memory
+    exit_price: float | None = None
+    reflect: bool = False
 
 
 @router.put("/{task_id}/pnl")
 def update_pnl(task_id: str, data: PnLUpdate):
-    """Update P&L for a completed analysis. Optionally feed to agent memory (reflect).
+    """Update manually observed P&L for a completed research analysis.
 
-    If exit_price is None, trade is marked as 'open' (no exit yet).
+    This legacy feedback path does not authorize execution and is separate from the
+    Phase-6 net-cost paper ledger and Phase-4 strict replay outcomes.
     """
     analysis = get_analysis(task_id)
     if not analysis:
         return {"error": "Analysis not found"}
 
-    # Open trade (entry only, no exit yet)
     if data.exit_price is None:
         update_analysis_pnl(task_id, data.entry_price, None, None, None, "open")
         return {
             "status": "updated",
             "pnl_status": "open",
-            "message": "Trade marked as open. Update again with exit price when you close.",
+            "trade_authorization": False,
+            "message": "Research outcome marked open. This is not an execution record.",
         }
 
     pnl_amount = data.exit_price - data.entry_price
     pnl_pct = round((pnl_amount / data.entry_price) * 100, 2)
     pnl_status = "win" if pnl_amount > 0 else ("loss" if pnl_amount < 0 else "breakeven")
 
-    # Flip for SELL/SHORT signals
-    signal = (analysis.get("signal") or "").upper()
-    if signal in ("SELL", "UNDERWEIGHT", "SHORT"):
+    research_label = (analysis.get("signal") or "").upper()
+    if research_label == "SHORT_CANDIDATE":
         pnl_amount = -pnl_amount
         pnl_pct = -pnl_pct
         pnl_status = "win" if pnl_amount > 0 else ("loss" if pnl_amount < 0 else "breakeven")
@@ -287,6 +449,7 @@ def update_pnl(task_id: str, data: PnLUpdate):
         "pnl_pct": pnl_pct,
         "pnl_amount": round(pnl_amount, 2),
         "pnl_status": pnl_status,
+        "trade_authorization": False,
         "reflection": reflection_result,
     }
 
@@ -298,7 +461,6 @@ def _reflect_on_analysis(analysis: dict, pnl_amount: float) -> dict:
         from tradingagents.agents.utils.memory import FinancialSituationMemory
         from tradingagents.llm_clients import create_llm_client
 
-        # Reconstruct state from DB
         state = {
             "market_report": analysis.get("market_report", ""),
             "sentiment_report": analysis.get("sentiment_report", ""),
@@ -315,27 +477,22 @@ def _reflect_on_analysis(analysis: dict, pnl_amount: float) -> dict:
             },
         }
 
-        # Skip if no reports
         if not state["market_report"] and not state["news_report"]:
             return {"error": "No reports available for reflection"}
 
-        # Create LLM client
         quick_client = create_llm_client(
             provider=DEFAULT_CONFIG["llm_provider"],
             model=DEFAULT_CONFIG["quick_think_llm"],
         )
         quick_llm = quick_client.get_llm()
-
         reflector = Reflector(quick_llm)
 
-        # Create memory instances (they auto-load from disk)
         bull_mem = FinancialSituationMemory("bull_memory", DEFAULT_CONFIG)
         bear_mem = FinancialSituationMemory("bear_memory", DEFAULT_CONFIG)
         trader_mem = FinancialSituationMemory("trader_memory", DEFAULT_CONFIG)
         judge_mem = FinancialSituationMemory("invest_judge_memory", DEFAULT_CONFIG)
         pm_mem = FinancialSituationMemory("portfolio_manager_memory", DEFAULT_CONFIG)
 
-        # Run reflection — each adds to memory + auto-saves to disk
         reflector.reflect_bull_researcher(state, pnl_amount, bull_mem)
         reflector.reflect_bear_researcher(state, pnl_amount, bear_mem)
         reflector.reflect_trader(state, pnl_amount, trader_mem)
@@ -378,5 +535,9 @@ def get_memory_stats():
 
 @router.get("/history/list")
 def list_analysis_history(limit: int = 50, offset: int = 0):
-    """List past analyses."""
-    return get_analysis_history(limit, offset)
+    """List past analyses. `signal` is a non-authorizing research label in Trade Brain."""
+    rows = get_analysis_history(limit, offset)
+    for row in rows:
+        row["research_label"] = row.get("signal") or "NO_TRADE"
+        row["trade_authorization"] = False
+    return rows

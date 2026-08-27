@@ -2,7 +2,17 @@
 
 import { useState, useCallback } from "react";
 import { runAnalysis, connectAnalysisWS } from "@/lib/api";
-import type { WSEvent, AnalysisResult } from "@/lib/types";
+
+type AnalysisWSEvent = {
+  type: "heartbeat" | "report" | "debate" | "risk_debate" | "verification" | "signal" | "stats" | "complete" | "error" | string;
+  section?: string;
+  side?: "bull" | "bear" | "aggressive" | "conservative" | "neutral" | string;
+  content?: string;
+  decision?: string;
+  research_label?: string;
+  duration_seconds?: number;
+  message?: string;
+};
 
 interface AnalysisState {
   taskId: string | null;
@@ -45,26 +55,29 @@ export function useAnalysis() {
 
       setState((s) => ({ ...s, taskId }));
 
-      const ws = connectAnalysisWS(taskId, (event: WSEvent) => {
+      const ws = connectAnalysisWS(taskId, (event: AnalysisWSEvent) => {
         setState((prev) => {
           switch (event.type) {
             case "report":
+              if (!event.section || event.content == null) return prev;
               return {
                 ...prev,
-                reports: { ...prev.reports, [event.section!]: event.content! },
+                reports: { ...prev.reports, [event.section]: event.content },
               };
             case "debate":
+              if ((event.side !== "bull" && event.side !== "bear") || event.content == null) return prev;
               return {
                 ...prev,
-                debates: { ...prev.debates, [event.side!]: event.content! },
+                debates: { ...prev.debates, [event.side]: event.content },
               };
             case "risk_debate":
+              if (!event.content || !["aggressive", "conservative", "neutral"].includes(String(event.side))) return prev;
               return {
                 ...prev,
-                riskDebates: { ...prev.riskDebates, [event.side!]: event.content! },
+                riskDebates: { ...prev.riskDebates, [event.side as keyof typeof prev.riskDebates]: event.content },
               };
             case "signal":
-              return { ...prev, signal: event.decision! };
+              return { ...prev, signal: event.research_label || event.decision || null };
             case "complete":
               ws.close();
               return { ...prev, status: "completed", duration: event.duration_seconds ?? null };

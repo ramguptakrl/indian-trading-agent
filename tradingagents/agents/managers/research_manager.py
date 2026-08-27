@@ -1,8 +1,8 @@
-
 from tradingagents.agents.utils.agent_utils import build_instrument_context
+from tradingagents.horizon_policy import horizon_instruction
 
 
-def create_research_manager(llm, memory):
+def create_research_manager(llm, memory, requested_trade_mode: str | None = None):
     def research_manager_node(state) -> dict:
         instrument_context = build_instrument_context(state["company_of_interest"])
         history = state["investment_debate_state"].get("history", "")
@@ -20,23 +20,27 @@ def create_research_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""As the Research Manager for an **Indian market (NSE/BSE) short-term trading desk**, critically evaluate this debate round and make a definitive decision for a short-term trade (intraday to 2 weeks).
+        horizon_context = horizon_instruction(requested_trade_mode)
+        prompt = f"""As the Research Manager for Trade Brain's **BSE Ltd-only resident-Indian equity research desk**, critically evaluate this debate round for the dedicated horizon below.
 
-Your recommendation — Buy, Sell, or Hold — must be clear, actionable, and specific to the short-term horizon. Avoid defaulting to Hold unless both sides present equally compelling arguments with no clear edge. Commit to the stance with the strongest short-term evidence.
+{horizon_context}
 
-Develop a detailed trading plan for the trader:
+Your recommendation must stay inside that dedicated horizon. Never substitute SWING for a weak INTRADAY setup, never substitute INTRADAY/SHORT for a weak SWING setup, and never invent broker/MTF facts. If the evidence does not support a defensible setup for this horizon, prefer HOLD / WAIT or NO TRADE rather than forcing a trade.
 
-1. **Recommendation**: Buy / Sell / Hold — decisive, with the strongest debate arguments supporting it
-2. **Rationale**: Why these arguments win for the SHORT-TERM (not long-term investment thesis)
-3. **Entry Strategy**: Specific entry price/zone, or conditions for entry (e.g., "buy on pullback to 2800 support")
-4. **Stop-Loss Level**: Specific price — non-negotiable for short-term trades
-5. **Profit Targets**: Target 1 (conservative) and Target 2 (extended)
-6. **Time Horizon**: How long to hold — intraday / 2-3 days / 1 week
-7. **Key Risks**: Top 2-3 risks to monitor during the trade
+Develop a detailed research plan for the Trader:
 
-**Indian Market Context**: Consider NIFTY trend, FII/DII flows, sector momentum, and upcoming events (RBI policy, earnings, expiry) when making your decision.
+1. **Recommendation**: Buy / Sell / Hold / No Trade, with the strongest debate arguments supporting it
+2. **Rationale**: Why these arguments matter for the DEDICATED HORIZON only
+3. **Entry Strategy**: Specific entry price/zone or explicit conditions for entry; use N/A when no trade is justified
+4. **Stop-Loss Level**: Specific price for a proposed new trade; otherwise N/A
+5. **Profit Targets**: Target 1 and Target 2 for a proposed new trade; otherwise N/A
+6. **Time Horizon**: Must match the dedicated horizon above
+7. **Key Risks / Invalidation**: Top risks and what would invalidate the thesis
+8. **Missing / Unverified Inputs**: Explicitly identify material gaps instead of inventing them
 
-Past reflections on mistakes:
+**Indian Market Context**: Consider only supplied/traceable NIFTY context, FII/DII flows, sector momentum and upcoming events when they are actually present in the evidence. Do not fabricate missing market-context facts.
+
+Past reflections on mistakes are hypotheses, not authority:
 \"{past_memory_str}\"
 
 {instrument_context}

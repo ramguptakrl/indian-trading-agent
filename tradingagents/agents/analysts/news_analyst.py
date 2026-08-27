@@ -1,26 +1,62 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from backend.tradebrain.news_evidence import news_evidence_for_prompt
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_global_news,
     get_language_instruction,
     get_news,
 )
-from tradingagents.dataflows.config import get_config
 
 
 def create_news_analyst(llm):
     def news_analyst_node(state):
         current_date = state["trade_date"]
         instrument_context = build_instrument_context(state["company_of_interest"])
+        official_first_context = news_evidence_for_prompt(current_date)
 
-        tools = [
-            get_news,
-            get_global_news,
-        ]
+        # Yahoo/Alpha Vantage tools are supplementary discovery. The deterministic context
+        # above already supplies official NSE/BSE/SEBI evidence and point-in-time archived
+        # Indian financial media where available.
+        tools = [get_news, get_global_news]
 
         system_message = (
-            "You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for company-specific or targeted news searches, and get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
-            + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
+            """You are Trade Brain's **BSE Ltd news and market-context analyst**. Your job is
+not to summarize the whole world. Find and rank information that could plausibly affect BSE
+Ltd's price, volatility or risk for INTRADAY or SWING decisions.
+
+SOURCE AUTHORITY — obey this order:
+1. Official NSE/BSE company disclosures and exchange-source facts.
+2. Official SEBI circulars/orders/press releases relevant to exchanges, clearing or market structure.
+3. Major Indian financial media such as Moneycontrol, Economic Times, LiveMint, Business Standard,
+   NDTV Profit and similarly reputable reporting for context/interpretation.
+4. Yahoo Finance / Alpha Vantage as supplementary discovery or aggregation.
+
+An official disclosure outranks a media interpretation. Never call a media-only material claim HIGH
+confidence merely because several aggregators repeat it; seek official confirmation first. If official
+and media accounts conflict, state the conflict and keep confidence constrained.
+
+RECENCY DISCIPLINE:
+- For current catalyst/news context, do not promote a media article older than 30 calendar days from
+  the analysis date, even if a supplementary tool returns it today.
+- INTRADAY should weight the most recent 1-3 trading days most heavily; SWING may use the broader
+  30-day current-media window.
+- Older items may be mentioned only as clearly labelled BACKGROUND when they are structurally useful;
+  they must never be presented as current news or the sole current catalyst.
+- If only stale or undated supplementary articles are found, explicitly state that recent media context
+  is unavailable rather than elevating stale evidence.
+
+Prioritize, when supported by current sources:
+- BSE Ltd company announcements/results/corporate actions;
+- SEBI/exchange/clearing/market-structure or derivatives regulation relevant to exchange economics;
+- Indian cash/derivatives/primary-market activity and capital-market participation;
+- competitive exchange developments and material market-share context;
+- broad NIFTY/BANK NIFTY/India-risk sentiment only when it changes BSE Ltd risk context;
+- global risk events only when there is a credible transmission path to Indian capital markets.
+
+For each important item distinguish source fact from your interpretation, state the date, identify the
+source tier, and explain the BSE transmission mechanism. Ignore generic headlines with no plausible
+BSE link. Do not recommend another security and do not issue the final Trade Brain verdict."""
+            + " Append a Markdown table: Date | Evidence/event | Source + tier | BSE impact path | Horizon | Bias/uncertainty."
             + get_language_instruction()
         )
 
@@ -28,14 +64,11 @@ def create_news_analyst(llm):
             [
                 (
                     "system",
-                    "You are a helpful AI assistant, collaborating with other assistants."
-                    " Use the provided tools to progress towards answering the question."
-                    " If you are unable to fully answer, that's OK; another assistant with different tools"
-                    " will help where you left off. Execute what you can to make progress."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
-                    " You have access to the following tools: {tool_names}.\n{system_message}"
-                    "For your reference, the current date is {current_date}. {instrument_context}",
+                    "You are a research assistant inside Trade Brain. Use the deterministic official-first "
+                    "evidence below before supplementary discovery tools. Explicitly say when current "
+                    "evidence is unavailable. Tools: {tool_names}.\n{system_message}\n"
+                    "Current India analysis date: {current_date}. {instrument_context}\n\n"
+                    "{official_first_context}",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -45,18 +78,15 @@ def create_news_analyst(llm):
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(instrument_context=instrument_context)
+        prompt = prompt.partial(official_first_context=official_first_context)
 
         chain = prompt | llm.bind_tools(tools)
         result = chain.invoke(state["messages"])
 
         report = ""
-
         if len(result.tool_calls) == 0:
             report = result.content
 
-        return {
-            "messages": [result],
-            "news_report": report,
-        }
+        return {"messages": [result], "news_report": report}
 
     return news_analyst_node

@@ -1,26 +1,71 @@
 import os
+import time
 from typing import Any, Optional
 
 from langchain_openai import ChatOpenAI
 
+from backend.tradebrain.llm_failover import (
+    GLOBAL_GROQ_GOVERNOR,
+    groq_governor_enabled,
+    is_retryable_llm_capacity_error,
+    retry_after_seconds,
+)
 from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
 
 
 class NormalizedChatOpenAI(ChatOpenAI):
-    """ChatOpenAI with normalized content output.
+    """ChatOpenAI with normalized output and Trade Brain Groq free-tier pacing.
 
-    The Responses API returns content as a list of typed blocks
-    (reasoning, text, etc.). This normalizes to string for consistent
-    downstream handling.
+    Successful Groq calls reconcile the governor's estimate with actual provider token usage
+    and observe Groq's live rate-limit headers. Capacity-rejected reservations are released,
+    and Retry-After/reset timing is imposed process-wide so another agent cannot stampede the
+    same exhausted window.
     """
 
+    tradebrain_provider: str = "openai"
+    tradebrain_groq_retry_attempts: int = 4
+    tradebrain_groq_max_retry_wait_seconds: float = 90.0
+
     def invoke(self, input, config=None, **kwargs):
-        return normalize_content(super().invoke(input, config, **kwargs))
+        provider = str(self.tradebrain_provider or "").lower()
+        if provider != "groq" or not groq_governor_enabled():
+            return normalize_content(super().invoke(input, config, **kwargs))
+
+        attempt = 0
+        while True:
+            reservation = GLOBAL_GROQ_GOVERNOR.reserve(input)
+            try:
+                response = super().invoke(input, config, **kwargs)
+                GLOBAL_GROQ_GOVERNOR.observe_response(response)
+                GLOBAL_GROQ_GOVERNOR.reconcile(reservation, response)
+                return normalize_content(response)
+            except Exception as exc:
+                # Read any 429/reset headers before deciding whether to wait or fail over.
+                GLOBAL_GROQ_GOVERNOR.observe_error(exc)
+                # A rejected capacity request did not produce a usable completion; do not
+                # count its full estimated output against our local rolling token budget.
+                GLOBAL_GROQ_GOVERNOR.release(reservation)
+                if not is_retryable_llm_capacity_error(exc):
+                    raise
+                if attempt >= int(self.tradebrain_groq_retry_attempts):
+                    raise
+
+                delay = retry_after_seconds(exc)
+                GLOBAL_GROQ_GOVERNOR.impose_cooldown(delay + 0.25)
+                # A free-tier minute-window reset is normally <=60 s. Much longer reset
+                # windows are likely daily/model quota exhaustion, where Gemini fallback is
+                # preferable to blocking an analyst for many minutes.
+                if delay > float(self.tradebrain_groq_max_retry_wait_seconds):
+                    raise
+
+                attempt += 1
+                time.sleep(max(0.25, delay + 0.25))
+
 
 # Kwargs forwarded from user config to ChatOpenAI
 _PASSTHROUGH_KWARGS = (
-    "timeout", "max_retries", "reasoning_effort",
+    "timeout", "max_retries", "reasoning_effort", "max_tokens",
     "api_key", "callbacks", "http_client", "http_async_client",
 )
 
@@ -30,19 +75,21 @@ _PROVIDER_CONFIG = {
     "deepseek": ("https://api.deepseek.com", "DEEPSEEK_API_KEY"),
     "qwen": ("https://dashscope-intl.aliyuncs.com/compatible-mode/v1", "DASHSCOPE_API_KEY"),
     "glm": ("https://api.z.ai/api/paas/v4/", "ZHIPU_API_KEY"),
+    "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY"),
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
     "ollama": ("http://localhost:11434/v1", None),
 }
 
 
-class OpenAIClient(BaseLLMClient):
-    """Client for OpenAI, Ollama, OpenRouter, and xAI providers.
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
 
-    For native OpenAI models, uses the Responses API (/v1/responses) which
-    supports reasoning_effort with function tools across all model families
-    (GPT-4.1, GPT-5). Third-party compatible providers (xAI, OpenRouter,
-    Ollama) use standard Chat Completions.
-    """
+
+class OpenAIClient(BaseLLMClient):
+    """Client for OpenAI and OpenAI-compatible providers."""
 
     def __init__(
         self,
@@ -55,11 +102,14 @@ class OpenAIClient(BaseLLMClient):
         self.provider = provider.lower()
 
     def get_llm(self) -> Any:
-        """Return configured ChatOpenAI instance."""
+        """Return configured ChatOpenAI instance with bounded transient retries."""
         self.warn_if_unknown_model()
-        llm_kwargs = {"model": self.model}
+        llm_kwargs = {
+            "model": self.model,
+            "timeout": 60,
+            "max_retries": 2,
+        }
 
-        # Provider-specific base URL and auth
         if self.provider in _PROVIDER_CONFIG:
             base_url, api_key_env = _PROVIDER_CONFIG[self.provider]
             llm_kwargs["base_url"] = base_url
@@ -72,17 +122,29 @@ class OpenAIClient(BaseLLMClient):
         elif self.base_url:
             llm_kwargs["base_url"] = self.base_url
 
-        # Forward user-provided kwargs
+        if self.provider == "groq":
+            # Each agent needs a concise decision-quality report, not a multi-thousand-token
+            # essay. The lower default materially reduces both TPM pressure and daily burn.
+            llm_kwargs["max_retries"] = 0
+            llm_kwargs["max_tokens"] = max(
+                256,
+                min(_env_int("TRADEBRAIN_GROQ_MAX_COMPLETION_TOKENS", 800), 1600),
+            )
+            # LangChain otherwise discards the headers Groq gives us for exact live limits.
+            llm_kwargs["include_response_headers"] = True
+
+        # Forward caller overrides last; explicit config overrides safe defaults.
         for key in _PASSTHROUGH_KWARGS:
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 
-        # Native OpenAI: use Responses API for consistent behavior across
-        # all model families. Third-party providers use Chat Completions.
         if self.provider == "openai":
             llm_kwargs["use_responses_api"] = True
 
-        return NormalizedChatOpenAI(**llm_kwargs)
+        return NormalizedChatOpenAI(
+            tradebrain_provider=self.provider,
+            **llm_kwargs,
+        )
 
     def validate_model(self) -> bool:
         """Validate model for the provider."""

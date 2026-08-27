@@ -1,0 +1,233 @@
+name: Trade Brain Foundation
+
+on:
+  pull_request:
+    paths:
+      - "backend/tradebrain/**"
+      - "backend/routers/market_data.py"
+      - "backend/routers/tradebrain.py"
+      - "backend/routers/tradebrain_phase3.py"
+      - "backend/routers/tradebrain_phase4.py"
+      - "backend/routers/tradebrain_phase5.py"
+      - "backend/routers/tradebrain_phase6.py"
+      - "backend/routers/tradebrain_phase7.py"
+      - "backend/routers/tradebrain_phase8.py"
+      - "backend/routers/tradebrain_phase9.py"
+      - "backend/routers/tradebrain_phase10.py"
+      - "backend/routers/tradebrain_evidence.py"
+      - "backend/routers/analysis.py"
+      - "backend/routers/analysis_horizons.py"
+      - "backend/routers/recommender.py"
+      - "backend/routers/daily_verdict.py"
+      - "backend/app.py"
+      - "tradingagents/default_config.py"
+      - "tradingagents/horizon_policy.py"
+      - "tradingagents/dataflows/interface.py"
+      - "tradingagents/dataflows/tradebrain_market.py"
+      - "tradingagents/graph/signal_processing.py"
+      - "tradingagents/agents/trader/trader.py"
+      - "tradingagents/agents/managers/portfolio_manager.py"
+      - "frontend/src/app/analysis/**"
+      - "frontend/src/app/history/**"
+      - "frontend/src/components/analysis/**"
+      - "frontend/src/lib/store.ts"
+      - "frontend/src/lib/types.ts"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "tests/test_tradebrain_*.py"
+      - "scripts/tradebrain_phase2_smoke.py"
+      - "scripts/tradebrain_phase3_smoke.py"
+      - "scripts/tradebrain_phase4_smoke.py"
+      - "scripts/tradebrain_phase5_smoke.py"
+      - "scripts/tradebrain_phase6_smoke.py"
+      - "scripts/tradebrain_phase10_smoke.py"
+      - "scripts/tradebrain_bse_evidence_baseline.py"
+      - "scripts/tradebrain_kite_live_stream.py"
+      - "scripts/tradebrain_kite_auth.py"
+      - "scripts/tradebrain_test_interpretation.py"
+      - "start.sh"
+      - "pyproject.toml"
+      - ".env.example"
+      - "README.md"
+      - "CLAUDE.md"
+      - "AGENTS.md"
+      - ".github/workflows/tradebrain-foundation.yml"
+  push:
+    branches:
+      - "tradebrain/**"
+    paths:
+      - "backend/tradebrain/**"
+      - "backend/routers/market_data.py"
+      - "backend/routers/tradebrain.py"
+      - "backend/routers/tradebrain_phase3.py"
+      - "backend/routers/tradebrain_phase4.py"
+      - "backend/routers/tradebrain_phase5.py"
+      - "backend/routers/tradebrain_phase6.py"
+      - "backend/routers/tradebrain_phase7.py"
+      - "backend/routers/tradebrain_phase8.py"
+      - "backend/routers/tradebrain_phase9.py"
+      - "backend/routers/tradebrain_phase10.py"
+      - "backend/routers/tradebrain_evidence.py"
+      - "backend/routers/analysis.py"
+      - "backend/routers/analysis_horizons.py"
+      - "backend/routers/recommender.py"
+      - "backend/routers/daily_verdict.py"
+      - "backend/app.py"
+      - "tradingagents/default_config.py"
+      - "tradingagents/horizon_policy.py"
+      - "tradingagents/dataflows/interface.py"
+      - "tradingagents/dataflows/tradebrain_market.py"
+      - "tradingagents/graph/signal_processing.py"
+      - "tradingagents/agents/trader/trader.py"
+      - "tradingagents/agents/managers/portfolio_manager.py"
+      - "frontend/src/app/analysis/**"
+      - "frontend/src/app/history/**"
+      - "frontend/src/components/analysis/**"
+      - "frontend/src/lib/store.ts"
+      - "frontend/src/lib/types.ts"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "tests/test_tradebrain_*.py"
+      - "scripts/tradebrain_phase2_smoke.py"
+      - "scripts/tradebrain_phase3_smoke.py"
+      - "scripts/tradebrain_phase4_smoke.py"
+      - "scripts/tradebrain_phase5_smoke.py"
+      - "scripts/tradebrain_phase6_smoke.py"
+      - "scripts/tradebrain_phase10_smoke.py"
+      - "scripts/tradebrain_bse_evidence_baseline.py"
+      - "scripts/tradebrain_kite_live_stream.py"
+      - "scripts/tradebrain_kite_auth.py"
+      - "scripts/tradebrain_test_interpretation.py"
+      - "start.sh"
+      - "pyproject.toml"
+      - ".env.example"
+      - "README.md"
+      - "CLAUDE.md"
+      - "AGENTS.md"
+      - ".github/workflows/tradebrain-foundation.yml"
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Trade Brain test dependencies
+        run: >-
+          python -m pip install
+          "fastapi>=0.115,<1"
+          "pydantic>=2,<3"
+          "python-dotenv>=1.0"
+          "pytest>=8,<10"
+          "requests>=2.32"
+          "pypdf>=5,<7"
+          "scikit-learn>=1.5,<2"
+          "stockstats>=0.6.5"
+          "tzdata>=2025.2"
+          "websockets>=13"
+          "yfinance>=0.2.63"
+      - name: Compile Trade Brain integration files
+        run: >-
+          python -m compileall -q
+          backend/tradebrain
+          backend/routers/market_data.py
+          backend/routers/tradebrain.py
+          backend/routers/tradebrain_phase3.py
+          backend/routers/tradebrain_phase4.py
+          backend/routers/tradebrain_phase5.py
+          backend/routers/tradebrain_phase6.py
+          backend/routers/tradebrain_phase7.py
+          backend/routers/tradebrain_phase8.py
+          backend/routers/tradebrain_phase9.py
+          backend/routers/tradebrain_phase10.py
+          backend/routers/tradebrain_evidence.py
+          backend/routers/analysis.py
+          backend/routers/analysis_horizons.py
+          backend/app.py
+          scripts/tradebrain_phase2_smoke.py
+          scripts/tradebrain_phase3_smoke.py
+          scripts/tradebrain_phase4_smoke.py
+          scripts/tradebrain_phase5_smoke.py
+          scripts/tradebrain_phase6_smoke.py
+          scripts/tradebrain_phase10_smoke.py
+          scripts/tradebrain_bse_evidence_baseline.py
+          scripts/tradebrain_kite_live_stream.py
+          scripts/tradebrain_kite_auth.py
+          scripts/tradebrain_test_interpretation.py
+          tradingagents/horizon_policy.py
+          tradingagents/dataflows/interface.py
+          tradingagents/dataflows/tradebrain_market.py
+          tradingagents/graph/signal_processing.py
+          tradingagents/agents/trader/trader.py
+          tradingagents/agents/managers/portfolio_manager.py
+      - name: Validate one-button launcher syntax
+        run: bash -n start.sh
+      - name: Run all Trade Brain tests + write TXT interpretation
+        shell: bash
+        run: |
+          mkdir -p artifacts/audit
+          set +e
+          python -m pytest -q tests/test_tradebrain_*.py 2>&1 | tee artifacts/audit/tradebrain-tests.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          python scripts/tradebrain_test_interpretation.py \
+            --test-log artifacts/audit/tradebrain-tests.txt \
+            --exit-code "$status" \
+            --output artifacts/audit/tradebrain-test-interpretation.txt
+          exit "$status"
+      - name: Upload Trade Brain TXT validation audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tradebrain-test-audit-txt
+          path: artifacts/audit/
+          if-no-files-found: warn
+      - name: Live Phase 2 exchange + attachment smoke (observational)
+        continue-on-error: true
+        run: python scripts/tradebrain_phase2_smoke.py
+      - name: Live Phase 3 market-data + replay smoke (observational)
+        continue-on-error: true
+        run: python scripts/tradebrain_phase3_smoke.py
+      - name: Live Phase 4 strict outcome + focus lab smoke (observational)
+        continue-on-error: true
+        run: python scripts/tradebrain_phase4_smoke.py
+      - name: Live Phase 5 frozen challenger smoke (observational)
+        continue-on-error: true
+        run: python scripts/tradebrain_phase5_smoke.py
+      - name: Live Phase 6 resident net-cost paper smoke (observational)
+        continue-on-error: true
+        run: python scripts/tradebrain_phase6_smoke.py
+      - name: Live Phase 10 calendar + BSE final advisory smoke (observational)
+        continue-on-error: true
+        run: python scripts/tradebrain_phase10_smoke.py
+      - name: Build live BSE descriptive evidence baseline
+        id: evidence
+        continue-on-error: true
+        env:
+          TRADEBRAIN_EVIDENCE_OUTPUT_DIR: artifacts/evidence
+        run: python scripts/tradebrain_bse_evidence_baseline.py
+      - name: Upload BSE evidence baseline
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bse-evidence-baseline
+          path: artifacts/evidence/
+          if-no-files-found: warn
+
+  frontend-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build frontend Trade Brain contract
+        working-directory: frontend
+        run: npm run build

@@ -1,0 +1,72 @@
+name: Sync Trade Brain Wiki
+
+on:
+  push:
+    branches:
+      - tradebrain/reframe-foundation
+    paths:
+      - "docs/wiki/**"
+      - ".github/workflows/sync-tradebrain-wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tradebrain-wiki-sync
+  cancel-in-progress: true
+
+jobs:
+  sync-wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout project memory source
+        uses: actions/checkout@v4
+
+      - name: Mirror managed pages to GitHub Wiki
+        env:
+          WIKI_URL: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.wiki.git
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          WIKI_DIR="$RUNNER_TEMP/tradebrain-wiki"
+          rm -rf "$WIKI_DIR"
+
+          if ! git clone "$WIKI_URL" "$WIKI_DIR"; then
+            echo "::error::The repository Wiki is enabled but its Git repository is not initialized or is not writable by GITHUB_TOKEN. Create the first Wiki Home page once in GitHub, then re-run this workflow."
+            exit 1
+          fi
+
+          managed_pages=(
+            "Home.md"
+            "Current-Status.md"
+            "Session-Handoff.md"
+            "Architecture-and-Doctrine.md"
+            "ML-Research-Plan.md"
+            "Roadmap-and-Next-Steps.md"
+            "Checkpoints-and-Recovery.md"
+            "Wiki-Maintenance-Policy.md"
+            "_Sidebar.md"
+          )
+
+          for page in "${managed_pages[@]}"; do
+            cp "docs/wiki/$page" "$WIKI_DIR/$page"
+          done
+
+          cd "$WIKI_DIR"
+          git config user.name "Trade Brain Wiki Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -- "${managed_pages[@]}"
+
+          if git diff --cached --quiet; then
+            echo "Wiki is already synchronized."
+            exit 0
+          fi
+
+          git commit -m "docs: sync Trade Brain project memory from ${GITHUB_SHA::12}"
+          wiki_branch="$(git branch --show-current)"
+          if [[ -z "$wiki_branch" ]]; then
+            wiki_branch="master"
+          fi
+          git push origin "HEAD:$wiki_branch"

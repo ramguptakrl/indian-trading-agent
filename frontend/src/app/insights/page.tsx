@@ -1,148 +1,91 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getLearningInsights } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { HelpSection } from "@/components/HelpSection";
 import {
-  Brain,
-  Loader2,
-  TrendingUp,
-  TrendingDown,
+  buildBseEvidenceBaseline,
+  getBseActualTradeStats,
+  getBseChallengerStats,
+  getBseEvidenceBaseline,
+  getBseEvidenceDoctrine,
+  getBseFocusLabStats,
+  getBseProspectiveGapObservations,
+} from "@/lib/bse-api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
   AlertTriangle,
+  BarChart3,
+  Brain,
   CheckCircle2,
-  Info,
+  Database,
+  FlaskConical,
   RefreshCw,
-  Sparkles,
-  Target,
-  Zap,
-  Calendar,
-  Award,
-  MinusCircle,
+  ShieldCheck,
 } from "lucide-react";
-import { toast } from "sonner";
 
-const insightsHelp = [
-  {
-    question: "What is this page?",
-    answer: "This analyzes your PAST trades (both paper trades and real ones with logged P&L) to surface patterns you wouldn't easily spot yourself.\n\nIt answers questions like:\n  \u2022 Which signals actually work for YOUR trades?\n  \u2022 Which stocks do you consistently win/lose on?\n  \u2022 Are HIGH confidence picks really better than LOW?\n  \u2022 Which months does your strategy fail in?\n\nMinimum 3 closed trades needed. More data = better insights.",
-  },
-  {
-    question: "Does the AI train itself?",
-    answer: "Not exactly. The LLM (Claude) never changes its weights. What happens:\n\n1. You log P&L on trades with 'Teach the agent' checked\n2. The Reflector writes a text reflection \u2014 \"This trade failed because...\"\n3. That reflection is stored in BM25 memory\n4. Next time you analyze a similar stock, past reflections are retrieved and added to the prompt\n\nSo the agent 'remembers' via context, not via training. This page gives you the same insights in a human-readable form, helping YOU learn to filter the agent's output.",
-  },
-  {
-    question: "How to use these insights?",
-    answer: "1. Check the SUMMARY card \u2014 key findings pop up first\n2. Look at STRENGTHS \u2014 where you have a real edge, trust these\n3. Look at WEAKNESSES \u2014 where you lose money, avoid or fade\n4. Each insight has a specific actionable tip\n5. Adjust your Recommendations + Scanner filters based on what works\n\nFor example: If HIGH confidence picks have 70% win rate but LOW has 40%, start filtering for HIGH only. If 'Volume Spike Bullish' has 65% win rate, make it a required signal.",
-  },
-  {
-    question: "Why is the sample size so important?",
-    answer: "With 3-5 trades, any pattern could be random chance. You need at least:\n  \u2022 10 trades for a signal-level insight to be meaningful\n  \u2022 20 trades for confidence-level analysis\n  \u2022 30+ trades for seasonal patterns\n\nThe 'count' on each insight shows sample size. Take insights with <10 trades with a pinch of salt.",
-  },
-];
+function metric(value: unknown, suffix = "") {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "number") return `${value.toLocaleString("en-IN")}${suffix}`;
+  return `${String(value)}${suffix}`;
+}
 
-const categoryIcons: Record<string, any> = {
-  "Signal Type": Sparkles,
-  "Confidence Level": Award,
-  "Strategy": Target,
-  "Seasonality": Calendar,
-  "Ticker": TrendingUp,
-  "Indicator": Zap,
-  "Direction": TrendingUp,
-};
-
-const typeStyles: Record<string, { bg: string; border: string; text: string; icon: any }> = {
-  strength: { bg: "bg-green-50", border: "border-green-300", text: "text-green-800", icon: CheckCircle2 },
-  positive: { bg: "bg-green-50", border: "border-green-200", text: "text-green-700", icon: TrendingUp },
-  neutral: { bg: "bg-gray-50", border: "border-gray-200", text: "text-gray-700", icon: MinusCircle },
-  caution: { bg: "bg-yellow-50", border: "border-yellow-300", text: "text-yellow-800", icon: AlertTriangle },
-  weakness: { bg: "bg-red-50", border: "border-red-300", text: "text-red-800", icon: TrendingDown },
-  insufficient: { bg: "bg-gray-50", border: "border-gray-200", text: "text-gray-500", icon: Info },
-};
-
-function InsightCard({ insight }: { insight: any }) {
-  const style = typeStyles[insight.type] || typeStyles.neutral;
-  const CategoryIcon = categoryIcons[insight.category] || Info;
-  const TypeIcon = style.icon;
-
+function Readiness({ label, ready }: { label: string; ready?: boolean }) {
   return (
-    <Card className={`${style.border} ${style.bg}`}>
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-3 mb-2">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-white">
-              <CategoryIcon className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">{insight.category}</p>
-              <p className="font-semibold">{insight.name}</p>
-            </div>
-          </div>
-          <Badge variant="outline" className={`${style.text} ${style.border} text-xs flex items-center gap-1`}>
-            <TypeIcon className="h-3 w-3" />
-            {insight.label}
-          </Badge>
-        </div>
-
-        <p className="text-sm text-muted-foreground mb-3">{insight.description}</p>
-
-        {/* Stats grid */}
-        <div className="grid grid-cols-4 gap-2 mb-3">
-          <div className="text-center p-2 rounded bg-white/50">
-            <p className="text-[10px] text-muted-foreground uppercase">Trades</p>
-            <p className="font-semibold text-sm">{insight.stats.count}</p>
-          </div>
-          <div className="text-center p-2 rounded bg-white/50">
-            <p className="text-[10px] text-muted-foreground uppercase">Win Rate</p>
-            <p className={`font-semibold text-sm ${insight.stats.win_rate >= 55 ? "text-green-700" : insight.stats.win_rate < 45 ? "text-red-700" : ""}`}>
-              {insight.stats.win_rate}%
-            </p>
-          </div>
-          <div className="text-center p-2 rounded bg-white/50">
-            <p className="text-[10px] text-muted-foreground uppercase">Avg</p>
-            <p className={`font-semibold text-sm ${insight.stats.avg_return >= 0 ? "text-green-700" : "text-red-700"}`}>
-              {insight.stats.avg_return >= 0 ? "+" : ""}{insight.stats.avg_return}%
-            </p>
-          </div>
-          <div className="text-center p-2 rounded bg-white/50">
-            <p className="text-[10px] text-muted-foreground uppercase">Best / Worst</p>
-            <p className="font-semibold text-xs">
-              <span className="text-green-700">+{insight.stats.best}%</span>
-              {" / "}
-              <span className="text-red-700">{insight.stats.worst}%</span>
-            </p>
-          </div>
-        </div>
-
-        {/* Actionable tip */}
-        <div className={`p-3 rounded-lg ${style.bg} border ${style.border} text-sm`}>
-          <div className="flex items-start gap-2">
-            <Brain className={`h-4 w-4 mt-0.5 flex-shrink-0 ${style.text}`} />
-            <p className={`${style.text} leading-relaxed`}>{insight.actionable_tip}</p>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <div className="flex items-center justify-between rounded-lg border p-3">
+      <span className="text-sm">{label}</span>
+      <Badge variant="outline" className={ready ? "border-green-300 text-green-700" : "border-amber-300 text-amber-700"}>
+        {ready ? "READY" : "NOT READY"}
+      </Badge>
+    </div>
   );
 }
 
-export default function InsightsPage() {
-  const [data, setData] = useState<any>(null);
+export default function BseEvidencePage() {
+  const [baseline, setBaseline] = useState<any>(null);
+  const [prospective, setProspective] = useState<any>(null);
+  const [focus, setFocus] = useState<any>(null);
+  const [challengers, setChallengers] = useState<any>(null);
+  const [actual, setActual] = useState<any>(null);
+  const [doctrine, setDoctrine] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("strengths");
+  const [building, setBuilding] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
 
   const load = async () => {
     setLoading(true);
+    setErrors([]);
+    const jobs = await Promise.allSettled([
+      getBseEvidenceBaseline(),
+      getBseProspectiveGapObservations(),
+      getBseFocusLabStats(),
+      getBseChallengerStats(),
+      getBseActualTradeStats(),
+      getBseEvidenceDoctrine(),
+    ]);
+
+    const setters = [setBaseline, setProspective, setFocus, setChallengers, setActual, setDoctrine];
+    const nextErrors: string[] = [];
+    jobs.forEach((job, index) => {
+      if (job.status === "fulfilled") setters[index](job.value);
+      else {
+        setters[index](null);
+        nextErrors.push(job.reason?.message || "Evidence endpoint unavailable");
+      }
+    });
+    setErrors(Array.from(new Set(nextErrors)));
+    setLoading(false);
+  };
+
+  const buildBaseline = async () => {
+    setBuilding(true);
     try {
-      const result: any = await getLearningInsights();
-      setData(result);
+      await buildBseEvidenceBaseline();
+      await load();
     } catch (e: any) {
-      toast.error(e.message || "Failed to load insights");
+      setErrors((existing) => Array.from(new Set([...existing, e?.message || "Could not build BSE evidence baseline"])));
     } finally {
-      setLoading(false);
+      setBuilding(false);
     }
   };
 
@@ -150,176 +93,149 @@ export default function InsightsPage() {
     load();
   }, []);
 
-  if (loading) {
-    return (
-      <div className="p-6">
-        <div className="py-20 text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
-          <p className="text-sm text-muted-foreground mt-3">Analyzing your trade history...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!data?.ok) {
-    return (
-      <div className="p-6 space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Brain className="h-6 w-6" /> Learning Insights
-          </h1>
-          <p className="text-sm text-muted-foreground">Pattern analysis of your trading history</p>
-        </div>
-
-        <Card className="border-blue-200 bg-blue-50/30">
-          <CardContent className="p-8 text-center">
-            <Info className="h-8 w-8 mx-auto text-blue-600 mb-3" />
-            <p className="text-sm font-medium mb-2">{data?.message || "Need more trade data"}</p>
-            <p className="text-xs text-muted-foreground mb-4">
-              You have {data?.total_trades || 0} closed trades so far. Aim for 10-20 to start seeing reliable patterns.
-            </p>
-            <div className="flex gap-2 justify-center flex-wrap">
-              <Button variant="outline" size="sm" onClick={() => (window.location.href = "/recommendations")}>
-                Open Top Picks
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => (window.location.href = "/simulation")}>
-                View Paper Trades
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => (window.location.href = "/history")}>
-                Log P&L
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <HelpSection title="About Learning Insights" items={insightsHelp} />
-      </div>
-    );
-  }
-
-  const strengths = data.insights.filter((i: any) => i.type === "strength" || i.type === "positive");
-  const weaknesses = data.insights.filter((i: any) => i.type === "weakness" || i.type === "caution");
-  const neutral = data.insights.filter((i: any) => i.type === "neutral");
+  const report = baseline?.report || baseline;
+  const coverage = report?.coverage || {};
+  const daily = report?.daily || {};
+  const intraday = report?.intraday || {};
+  const readiness = report?.evidence_readiness || {};
+  const quality = report?.data_quality || {};
+  const observations = prospective?.observations || [];
+  const scalarChallengerStats = Object.entries(challengers || {}).filter(
+    ([, value]) => typeof value === "number" || typeof value === "string"
+  );
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Brain className="h-6 w-6" /> Learning Insights
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Pattern analysis of your {data.total_trades} closed trades
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold flex items-center gap-2"><Brain className="h-6 w-6" /> BSE Evidence</h1>
+            <Badge variant="outline">NSE:BSE</Badge>
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">
+            Audited descriptive evidence, replay outcomes and frozen prospective validation for BSE Ltd only.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={load}>
-          <RefreshCw className="h-3 w-3 mr-1" />
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+            <RefreshCw className={`mr-1 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </Button>
+          <Button size="sm" onClick={buildBaseline} disabled={building}>
+            <Database className="mr-1 h-3.5 w-3.5" /> {building ? "Building..." : "Build BSE Baseline"}
+          </Button>
+        </div>
       </div>
 
-      {/* Overall Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Card>
-          <CardContent className="p-3 text-center">
-            <p className="text-xs text-muted-foreground">Total Trades</p>
-            <p className="text-2xl font-bold">{data.total_trades}</p>
-          </CardContent>
-        </Card>
-        <Card className={data.overall.win_rate >= 55 ? "border-green-200" : data.overall.win_rate < 45 ? "border-red-200" : ""}>
-          <CardContent className="p-3 text-center">
-            <p className="text-xs text-muted-foreground">Win Rate</p>
-            <p className={`text-2xl font-bold ${data.overall.win_rate >= 55 ? "text-green-600" : data.overall.win_rate < 45 ? "text-red-600" : ""}`}>
-              {data.overall.win_rate}%
-            </p>
-            <p className="text-xs text-muted-foreground">{data.overall.wins}W / {data.overall.losses}L</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 text-center">
-            <p className="text-xs text-muted-foreground">Avg Return</p>
-            <p className={`text-2xl font-bold ${data.overall.avg_return >= 0 ? "text-green-600" : "text-red-600"}`}>
-              {data.overall.avg_return >= 0 ? "+" : ""}{data.overall.avg_return}%
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-green-200">
-          <CardContent className="p-3 text-center">
-            <p className="text-xs text-muted-foreground">Strengths Found</p>
-            <p className="text-2xl font-bold text-green-600">{data.summary.strength_count}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-red-200">
-          <CardContent className="p-3 text-center">
-            <p className="text-xs text-muted-foreground">Weaknesses</p>
-            <p className="text-2xl font-bold text-red-600">{data.summary.weakness_count}</p>
-          </CardContent>
-        </Card>
+      <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
+        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>
+          Evidence readiness is not profitability. This page cannot authorize a trade, promote a challenger automatically, or place a broker order.
+        </span>
       </div>
 
-      {/* Key Findings */}
-      {data.summary.key_findings.length > 0 && (
-        <Card className="border-blue-200 bg-blue-50/30">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-blue-600" /> Key Findings
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {data.summary.key_findings.map((f: string, i: number) => (
-              <div key={i} className="flex items-start gap-2 text-sm">
-                <span className="text-blue-600 mt-0.5">•</span>
-                <span>{f}</span>
+      {errors.length > 0 && (
+        <Card className="border-amber-200 bg-amber-50/40">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-2 text-sm text-amber-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-medium">Some evidence is not available yet.</p>
+                <ul className="mt-1 list-disc pl-4 text-xs space-y-1">
+                  {errors.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+                <p className="mt-2 text-xs">That is expected on a fresh bootstrap; missing evidence is shown as missing rather than guessed.</p>
               </div>
-            ))}
+            </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Tabs */}
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="strengths">
-            <CheckCircle2 className="h-3 w-3 mr-1 text-green-600" />
-            Strengths ({strengths.length})
-          </TabsTrigger>
-          <TabsTrigger value="weaknesses">
-            <AlertTriangle className="h-3 w-3 mr-1 text-red-600" />
-            Weaknesses ({weaknesses.length})
-          </TabsTrigger>
-          <TabsTrigger value="neutral">
-            <MinusCircle className="h-3 w-3 mr-1" />
-            Neutral ({neutral.length})
-          </TabsTrigger>
-          <TabsTrigger value="all">All ({data.insights.length})</TabsTrigger>
-        </TabsList>
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Daily audited bars</p><p className="text-2xl font-bold">{metric(coverage.daily_bars)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">5m audited bars</p><p className="text-2xl font-bold">{metric(coverage.intraday_bars)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Full intraday sessions</p><p className="text-2xl font-bold">{metric(coverage.intraday_full_regular_sessions)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Unresolved data issues</p><p className="text-2xl font-bold">{metric(quality.unresolved_issues)}</p></CardContent></Card>
+      </div>
 
-        <TabsContent value="strengths" className="space-y-3 mt-4">
-          {strengths.length === 0 ? (
-            <Card><CardContent className="p-8 text-center text-muted-foreground text-sm">No clear strengths yet. Keep trading to build up patterns.</CardContent></Card>
-          ) : (
-            strengths.map((i: any, idx: number) => <InsightCard key={idx} insight={i} />)
-          )}
-        </TabsContent>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Database className="h-4 w-4" /> Descriptive BSE baseline</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">Median absolute opening gap</p><p className="font-semibold">{metric(daily.absolute_opening_gap_pct?.median, "%")}</p></div>
+              <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">90th percentile abs. gap</p><p className="font-semibold">{metric(daily.absolute_opening_gap_pct?.p90, "%")}</p></div>
+              <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">Median session range</p><p className="font-semibold">{metric(daily.session_range_pct_of_open?.median, "%")}</p></div>
+              <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">Median intraday full-session range</p><p className="font-semibold">{metric(intraday.full_session_range_pct_of_open?.median, "%")}</p></div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Method: {report?.method_version || "—"} · cutoff {report?.as_of || "—"}
+            </p>
+          </CardContent>
+        </Card>
 
-        <TabsContent value="weaknesses" className="space-y-3 mt-4">
-          {weaknesses.length === 0 ? (
-            <Card><CardContent className="p-8 text-center text-muted-foreground text-sm">No clear weaknesses detected! Good job — keep going.</CardContent></Card>
-          ) : (
-            weaknesses.map((i: any, idx: number) => <InsightCard key={idx} insight={i} />)
-          )}
-        </TabsContent>
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> Evidence readiness</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            <Readiness label="Daily descriptive coverage" ready={readiness.daily_descriptive_ready} />
+            <Readiness label="Intraday descriptive coverage" ready={readiness.intraday_descriptive_ready} />
+            <Readiness label="Walk-forward intraday candidate coverage" ready={readiness.walk_forward_intraday_candidate_ready} />
+            <p className="text-[11px] text-muted-foreground">{readiness.note || "Coverage gates indicate sample availability only."}</p>
+          </CardContent>
+        </Card>
+      </div>
 
-        <TabsContent value="neutral" className="space-y-3 mt-4">
-          {neutral.map((i: any, idx: number) => <InsightCard key={idx} insight={i} />)}
-        </TabsContent>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><BarChart3 className="h-4 w-4" /> Replay / Focus Lab</CardTitle></CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <div className="flex justify-between"><span className="text-muted-foreground">Replay outcomes</span><strong>{metric(focus?.replay_plan_outcomes)}</strong></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Ambiguous outcomes</span><strong>{metric(focus?.ambiguous_replay_outcomes)}</strong></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Level reliability runs</span><strong>{metric(focus?.level_reliability_runs)}</strong></div>
+          </CardContent>
+        </Card>
 
-        <TabsContent value="all" className="space-y-3 mt-4">
-          {data.insights.map((i: any, idx: number) => <InsightCard key={idx} insight={i} />)}
-        </TabsContent>
-      </Tabs>
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><FlaskConical className="h-4 w-4" /> Prospective evidence</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold">{observations.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">Stored future-only GAP-001 observations after the frozen hypothesis date.</p>
+          </CardContent>
+        </Card>
 
-      <HelpSection title="About Learning Insights" items={insightsHelp} />
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><FlaskConical className="h-4 w-4" /> Challenger system</CardTitle></CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {scalarChallengerStats.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No challenger summary available yet.</p>
+            ) : scalarChallengerStats.slice(0, 6).map(([key, value]) => (
+              <div key={key} className="flex justify-between gap-3">
+                <span className="text-muted-foreground">{key.replaceAll("_", " ")}</span>
+                <strong>{String(value)}</strong>
+              </div>
+            ))}
+            <p className="text-[11px] text-muted-foreground">Human approval is required before any soft parameter can be promoted.</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Actual BSE trade evidence</CardTitle></CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-4 text-sm">
+            {Object.entries(actual || {}).filter(([, value]) => typeof value === "number").map(([key, value]) => (
+              <div key={key}><span className="text-muted-foreground">{key.replaceAll("_", " ")}: </span><strong>{String(value)}</strong></div>
+            ))}
+            {!actual && <span className="text-muted-foreground">No actual-trade statistics available yet.</span>}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="rounded-lg border bg-muted/20 p-4 text-xs text-muted-foreground">
+        <p className="font-medium text-foreground">Research contract</p>
+        <p className="mt-1">
+          Strategy edge claimed: {String(doctrine?.strategy_edge_claimed ?? false)} · Win rate claimed: {String(doctrine?.win_rate_claimed ?? false)} · Hidden chain-of-thought persisted: {String(doctrine?.hidden_chain_of_thought_persisted ?? false)}.
+        </p>
+      </div>
     </div>
   );
 }

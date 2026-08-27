@@ -4,7 +4,8 @@ from langchain_core.callbacks import BaseCallbackHandler
 from typing import Any, Dict
 
 
-# Cost per million tokens (USD)
+# Cost per million text tokens (USD). Keep this table explicit/versioned; provider pricing
+# can change, so unknown models report token usage without inventing a dollar estimate.
 MODEL_COSTS = {
     # Anthropic
     "claude-opus-4-20250514": {"input": 15.0, "output": 75.0},
@@ -12,7 +13,12 @@ MODEL_COSTS = {
     "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
     "claude-3-5-sonnet-20241022": {"input": 3.0, "output": 15.0},
     "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.0},
-    # OpenAI
+    # OpenAI — GPT-5.6 public list pricing as of 2026-08-26.
+    "gpt-5.6-luna": {"input": 0.20, "output": 1.20},
+    "gpt-5.6-terra": {"input": 2.00, "output": 12.00},
+    "gpt-5.6-sol": {"input": 4.00, "output": 20.00},
+    "gpt-5.6": {"input": 4.00, "output": 20.00},
+    # Legacy OpenAI compatibility
     "gpt-5.4": {"input": 2.50, "output": 10.0},
     "gpt-5.4-mini": {"input": 0.15, "output": 0.60},
     "gpt-4.1": {"input": 2.50, "output": 10.0},
@@ -24,7 +30,7 @@ MODEL_COSTS = {
     "gemini-2-flash": {"input": 0.10, "output": 0.40},
 }
 
-# USD to INR conversion (approximate)
+# Approximate display conversion only. USD remains the authoritative cost estimate.
 USD_TO_INR = 83.0
 
 
@@ -46,11 +52,7 @@ class StatsCallback(BaseCallbackHandler):
         try:
             model_name = ""
             llm_output = getattr(response, "llm_output", None) or {}
-
-            # Try to get model name from llm_output
             model_name = llm_output.get("model_name") or llm_output.get("model") or ""
-
-            # Get token usage — format varies by provider
             usage = llm_output.get("token_usage") or llm_output.get("usage") or {}
 
             input_tokens = (
@@ -66,7 +68,6 @@ class StatsCallback(BaseCallbackHandler):
                 or 0
             )
 
-            # Try to extract from generations if not in llm_output
             if (not input_tokens and not output_tokens) and hasattr(response, "generations"):
                 for gen_list in response.generations:
                     for gen in gen_list:
@@ -83,20 +84,21 @@ class StatsCallback(BaseCallbackHandler):
             self.tokens_in += int(input_tokens or 0)
             self.tokens_out += int(output_tokens or 0)
 
-            # Track per-model breakdown
             if model_name:
                 if model_name not in self.per_model_tokens:
                     self.per_model_tokens[model_name] = {"input": 0, "output": 0}
                 self.per_model_tokens[model_name]["input"] += int(input_tokens or 0)
                 self.per_model_tokens[model_name]["output"] += int(output_tokens or 0)
 
-                # Cost calculation
                 costs = MODEL_COSTS.get(model_name)
                 if costs:
-                    call_cost = (input_tokens / 1_000_000) * costs["input"] + (output_tokens / 1_000_000) * costs["output"]
+                    call_cost = (
+                        (input_tokens / 1_000_000) * costs["input"]
+                        + (output_tokens / 1_000_000) * costs["output"]
+                    )
                     self.cost_usd += call_cost
         except Exception:
-            # Don't crash the analysis if stats collection fails
+            # Stats collection must never break an analysis.
             pass
 
     def on_tool_start(self, serialized: dict, input_str: str, **kwargs: Any) -> None:

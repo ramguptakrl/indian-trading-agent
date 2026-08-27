@@ -8,21 +8,56 @@ from tradingagents.agents.utils.agent_states import (
 )
 
 
+def _runtime_multi_timeframe_context(company_name: str, trade_date: str) -> str:
+    """Build BSE audited context lazily so non-BSE legacy imports stay lightweight."""
+    if str(company_name or "").strip().upper() not in {"BSE", "NSE:BSE", "BSE.NS", "BSE LTD", "BSE LIMITED"}:
+        return ""
+    try:
+        from backend.tradebrain.live_decision_context import (
+            build_bse_decision_context,
+            decision_context_for_prompt,
+        )
+
+        context = build_bse_decision_context(str(trade_date))
+        return decision_context_for_prompt(context)
+    except Exception as exc:
+        # Fail closed at the evidence boundary: an unavailable context is visible to the
+        # models and may never be replaced by invented timeframe values.
+        return (
+            "Audited multi-timeframe context status: CONTEXT_BUILD_FAILED\n"
+            f"Reason: {type(exc).__name__}: {str(exc)[:240]}\n"
+            "Candidate evidence complete: False\n"
+            "Do not invent 1D/4H/1H/15m values; use WAIT / NO TRADE when these are material."
+        )
+
+
 class Propagator:
     """Handles state initialization and propagation through the graph."""
 
     def __init__(self, max_recur_limit=100):
-        """Initialize with configuration parameters."""
         self.max_recur_limit = max_recur_limit
 
     def create_initial_state(
-        self, company_name: str, trade_date: str
+        self,
+        company_name: str,
+        trade_date: str,
+        *,
+        multi_timeframe_context: str = "",
     ) -> Dict[str, Any]:
-        """Create the initial state for the agent graph."""
+        """Create initial state with deterministic audited BSE timeframe evidence.
+
+        Callers may supply a prebuilt context for deterministic tests. Otherwise every BSE
+        graph run automatically builds the same look-ahead-safe D→4H→1H→15m snapshot.
+        """
+        audited_context = str(multi_timeframe_context or "").strip()
+        if not audited_context:
+            audited_context = _runtime_multi_timeframe_context(company_name, trade_date)
+
         return {
             "messages": [("human", company_name)],
             "company_of_interest": company_name,
             "trade_date": str(trade_date),
+            "multi_timeframe_context": audited_context,
             "investment_debate_state": InvestDebateState(
                 {
                     "bull_history": "",
@@ -54,12 +89,6 @@ class Propagator:
         }
 
     def get_graph_args(self, callbacks: Optional[List] = None) -> Dict[str, Any]:
-        """Get arguments for the graph invocation.
-
-        Args:
-            callbacks: Optional list of callback handlers for tool execution tracking.
-                       Note: LLM callbacks are handled separately via LLM constructor.
-        """
         config = {"recursion_limit": self.max_recur_limit}
         if callbacks:
             config["callbacks"] = callbacks

@@ -11,16 +11,16 @@ ProviderModeOptions = Dict[str, Dict[str, List[ModelOption]]]
 MODEL_OPTIONS: ProviderModeOptions = {
     "openai": {
         "quick": [
-            ("GPT-5.4 Mini - Fast, strong coding and tool use", "gpt-5.4-mini"),
-            ("GPT-5.4 Nano - Cheapest, high-volume tasks", "gpt-5.4-nano"),
-            ("GPT-5.4 - Latest frontier, 1M context", "gpt-5.4"),
-            ("GPT-4.1 - Smartest non-reasoning model", "gpt-4.1"),
+            ("GPT-5.6 Luna - Recommended high-volume Trade Brain model", "gpt-5.6-luna"),
+            ("GPT-5.6 Terra - Stronger balanced model", "gpt-5.6-terra"),
+            ("GPT-5.6 Sol - Frontier capability", "gpt-5.6-sol"),
+            ("GPT-5.4 Mini - Legacy compatible option", "gpt-5.4-mini"),
         ],
         "deep": [
-            ("GPT-5.4 - Latest frontier, 1M context", "gpt-5.4"),
-            ("GPT-5.2 - Strong reasoning, cost-effective", "gpt-5.2"),
-            ("GPT-5.4 Mini - Fast, strong coding and tool use", "gpt-5.4-mini"),
-            ("GPT-5.4 Pro - Most capable, expensive ($30/$180 per 1M tokens)", "gpt-5.4-pro"),
+            ("GPT-5.6 Terra - Recommended Trade Brain decision model", "gpt-5.6-terra"),
+            ("GPT-5.6 Sol - Frontier capability", "gpt-5.6-sol"),
+            ("GPT-5.6 Luna - Lowest-cost GPT-5.6 option", "gpt-5.6-luna"),
+            ("GPT-5.4 - Legacy compatible option", "gpt-5.4"),
         ],
     },
     "anthropic": {
@@ -38,16 +38,24 @@ MODEL_OPTIONS: ProviderModeOptions = {
     },
     "google": {
         "quick": [
-            ("Gemini 3 Flash - Next-gen fast", "gemini-3-flash-preview"),
-            ("Gemini 2.5 Flash - Balanced, stable", "gemini-2.5-flash"),
-            ("Gemini 3.1 Flash Lite - Most cost-efficient", "gemini-3.1-flash-lite-preview"),
-            ("Gemini 2.5 Flash Lite - Fast, low-cost", "gemini-2.5-flash-lite"),
+            ("Gemini 3.6 Flash - Stable primary, fast agentic loops", "gemini-3.6-flash"),
+            ("Gemini 3.5 Flash - Stable frontier Flash", "gemini-3.5-flash"),
+            ("Gemini 3.5 Flash-Lite - Stable high-throughput", "gemini-3.5-flash-lite"),
+            ("Gemini 2.5 Flash - Stable legacy option", "gemini-2.5-flash"),
         ],
         "deep": [
-            ("Gemini 3.1 Pro - Reasoning-first, complex workflows", "gemini-3.1-pro-preview"),
-            ("Gemini 3 Flash - Next-gen fast", "gemini-3-flash-preview"),
-            ("Gemini 2.5 Pro - Stable pro model", "gemini-2.5-pro"),
-            ("Gemini 2.5 Flash - Balanced, stable", "gemini-2.5-flash"),
+            ("Gemini 3.1 Pro - Advanced reasoning (preview)", "gemini-3.1-pro-preview"),
+            ("Gemini 3.6 Flash - Stable primary, strong reasoning", "gemini-3.6-flash"),
+            ("Gemini 3.5 Flash - Stable frontier Flash", "gemini-3.5-flash"),
+            ("Gemini 2.5 Pro - Stable legacy option", "gemini-2.5-pro"),
+        ],
+    },
+    "groq": {
+        "quick": [
+            ("GPT-OSS 20B on Groq - very fast tool-capable inference", "openai/gpt-oss-20b"),
+        ],
+        "deep": [
+            ("GPT-OSS 20B on Groq - reasoning + tool use", "openai/gpt-oss-20b"),
         ],
     },
     "xai": {
@@ -65,12 +73,12 @@ MODEL_OPTIONS: ProviderModeOptions = {
     },
     "deepseek": {
         "quick": [
-            ("DeepSeek V3.2", "deepseek-chat"),
+            ("DeepSeek V4 Flash - fast, low-cost, tool-capable", "deepseek-v4-flash"),
             ("Custom model ID", "custom"),
         ],
         "deep": [
-            ("DeepSeek V3.2 (thinking)", "deepseek-reasoner"),
-            ("DeepSeek V3.2", "deepseek-chat"),
+            ("DeepSeek V4 Pro - stronger reasoning + tool use", "deepseek-v4-pro"),
+            ("DeepSeek V4 Flash - cost-efficient reasoning", "deepseek-v4-flash"),
             ("Custom model ID", "custom"),
         ],
     },

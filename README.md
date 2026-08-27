@@ -1,720 +1,175 @@
-# Indian Market Trading Agent
+# Trade Brain v0.13 — BSE Ltd Decision Support
 
-> AI-powered multi-agent trading decision system for Indian markets (NSE/BSE).
-> Built on top of [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents), adapted for Indian stocks with a full web UI, market scanner, strategy toolkit, and performance tracking.
+Trade Brain is a **BSE Ltd-only** (`NSE:BSE`, ISIN `INE118H01025`) research, replay, validation and advisory system for a modeled `RESIDENT_INDIAN` trader.
 
-![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
-![Python](https://img.shields.io/badge/python-3.10+-green.svg)
-![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)
+It retains useful multi-agent research infrastructure from the inherited repository, but the active product is governed by Trade Brain's audited deterministic control plane.
 
-> **Disclaimer**: This tool provides AI-generated analysis for educational and research purposes only. It is NOT financial advice. Trading involves substantial risk of loss. Always do your own research, consult qualified professionals, and never trade money you can't afford to lose. The authors and contributors accept no responsibility for any financial losses incurred from using this software.
+**Trade Brain does not place broker orders.**
 
----
-
-## Attribution
-
-This project is built on top of the excellent [TradingAgents](https://github.com/TauricResearch/TradingAgents) framework by TauricResearch. The core multi-agent LLM pipeline — including the LangGraph orchestration, agent prompts, memory/reflection system, and data vendor abstraction — is directly derived from their work under the Apache 2.0 license.
-
-**Original paper**: [TradingAgents: Multi-Agents LLM Financial Trading Framework](https://arxiv.org/abs/2412.20138) (Xiao et al., 2024)
-
-**What's adapted for Indian markets in this fork:**
-- NSE/BSE ticker support (`.NS` / `.BO` suffixes)
-- Indian market news queries (RBI policy, FII/DII, NIFTY)
-- IST market hours + NSE holidays calendar
-- Indian risk factors in agent prompts (circuit limits, FII/DII flows, SGX cues)
-- Short-term trading focus (vs long-term in original)
-
-**What's added on top:**
-- Full Next.js web UI (trading terminal) — the original ships a CLI only
-- FastAPI backend with WebSocket streaming
-- Market Scanner (Gap / Volume / Breakout detection)
-- Unified Recommendation Engine (combines 10+ signals into ranked trade ideas)
-- **Daily Trading Verdict** — synthesizes all filters into single TRADE / SELECTIVE / STAND DOWN decision
-- **FII/DII Daily Flow Tracker** — live institutional buy/sell data adjusts all recommendations
-- **Earnings + Economic Calendar** — RBI policy, Budget, FOMC, F&O expiry, per-stock earnings dates filter recommendations
-- **Sector Concentration Checker** — prevents over-exposure to single sector (max 3 positions / 30% capital per sector)
-- Support/Resistance & Pivot Point calculator
-- Cyclical Pattern analysis (monthly seasonality, sector rotation, day-of-week)
-- Strategy Performance Tracker (measures historical win rates)
-- Paper Trading Simulation (multi-horizon P&L tracking, no API cost)
-- Historical Recommender Backtest (replay engine on past 60 days)
-- Learning Insights (pattern analysis on YOUR trades, no ML)
-- **Signal Performance Tracker** — measures real win rate of each recommender signal from closed trades and auto-tunes the scoring weights (closes the feedback loop)
-- **Verdict Calibration** — daily snapshot of the headline verdict + Nifty close, then 1/3/5-day forward returns measure whether GREEN/YELLOW/RED actually predict market direction
-- **Market Regime Classifier** — labels every trading day BULL / BEAR / SIDEWAYS / HIGH_VOL, tags every paper trade with the regime at entry, and reveals which signals are regime-dependent (e.g., "Near Support" might win 70% in BULL but 35% in BEAR)
-- **Confidence Calibration (Brier score)** — measures whether the recommender's stated `success_probability` is honest. Reliability diagram bins predictions by probability and compares to actual win rate. Flags overconfidence/underconfidence.
-- **Shadow Trades** — every STRONG BUY (and HIGH-confidence BUY) auto-recorded as a virtual trade regardless of whether the user clicked Track. After 1/3/5/10 days, actual P&L backfills. Surfaces false negatives — winners the user wrongly skipped — and tells you whether your filtering helps or hurts.
-- **Conditional Regime Weights** — recommender automatically picks the right weight layer based on today's regime. Three-layer merge: DEFAULT → base tuned → regime-specific overrides. So a signal that wins 75% in BULL but 25% in BEAR can have different weights applied automatically depending on which regime is active.
-- **Memory Pruning + Decay (BM25)** — agent BM25 memories now carry per-entry metadata (created_at, last_accessed, hit_count). Every retrieval applies an age-based decay multiplier so old lessons fade out automatically. Manual pruning (by age, hit count, or decay floor) physically removes stale entries. Lessons learned in a 2024 bull market no longer pollute 2026 decisions.
-- Seasonal Backtest (no AI cost)
-- Position Size Calculator
-- P&L Tracking + "Reflect & Remember" (feed outcomes to agent memory)
-- Memory Persistence (agents learn across sessions)
-- Customizable News Feed (RSS + yfinance)
-- API key management via UI
-- Multi-provider LLM support with real-time cost tracking
-
-Please consider starring the [original repo](https://github.com/TauricResearch/TradingAgents) if you find value in this work.
-
----
-
-## Demo
-
-```
-🏠 Today              — Daily workflow dashboard with:
-                        • Market Regime badge (BULL / BEAR / SIDEWAYS / HIGH_VOL)
-                        • Daily Verdict (TRADE / SELECTIVE / STAND DOWN)
-                        • Auto-loaded top picks
-                        • FII/DII flow banner
-                        • Calendar event warnings
-                        • Sector concentration tracker
-                        • Sector heatmap
-
-DISCOVER
-  ✨ Top Picks         — AI-free unified recommendations (FREE)
-                        Auto-adjusts for FII/DII + events + concentration
-  📡 Market Scan       — Gap / Volume / Breakout (FREE)
-  🎯 Strategies        — S/R, Pivot, Cyclical patterns (FREE)
-  📰 News Feed         — RSS + yfinance, customizable (FREE)
-
-ANALYZE
-  🔍 Deep Analysis     — AI-powered 10-agent pipeline (~Rs.15-60)
-  📊 Charts            — Candlestick charts (FREE)
-
-VALIDATE
-  🏆 Performance       — Strategy win rates (FREE)
-  🧪 Simulation        — Paper trading + historical backtest (FREE)
-  🧠 Learning Insights — Pattern analysis of YOUR trades (FREE)
-  📈 Signal Performance — Per-signal win rate + auto-tune recommender (FREE)
-  🎯 Verdict Calibration — Is the daily verdict actually predictive? (FREE)
-  ⚖️ Confidence Calibration — Brier score: are probabilities honest? (FREE)
-  👁️ Shadow Trades     — Counterfactual: trades you skipped (FREE)
-  🧠 Memory Admin      — Inspect + prune agent BM25 memories (FREE)
-  🔬 Backtest          — AI on past dates (paid)
-  📋 My Trades         — P&L tracking + agent learning
+```text
+advisory_only = true
+trade_authorization = false
+order_execution_allowed = false
 ```
 
----
+## Active product boundary
 
-## Quick Start
+### INTRADAY
 
-### Prerequisites
-- **Python 3.10+**
-- **Node.js 20+**
-- An LLM API key (Anthropic/OpenAI/Google — Anthropic Haiku is the cheapest default)
+- LONG or SHORT cash equity
+- same-session only
+- no fresh entry from 15:10 IST
+- flat before 15:15 IST
+- explicit Entry / Stop-Loss / Primary Target required
 
-### 1. Clone and install Python deps
+### SWING
 
-```bash
-git clone https://github.com/YOUR_USERNAME/indian-trading-agent.git
-cd indian-trading-agent
+- LONG only
+- multi-day
+- **Zerodha MTF-funded only** in the active product
+- current MTF eligibility must be verified
+- funded amount must be explicit
+- positive interest-days scenario required before fully costed advice/replay can PASS
+- historical `CNC_OWN_CASH` labels may remain readable, but cannot grant active SWING permission
 
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+MTF is a funding dimension of SWING, not a third trade mode. F&O and overnight cash-equity shorting are outside the active product.
 
-pip install -e .
-pip install fastapi uvicorn websockets aiosqlite numpy feedparser
+## Decision architecture
+
+A BSE analysis launches two independent research horizons:
+
+```text
+INTRADAY graph
+SWING · MTF graph
 ```
 
-### 2. Configure API key (pick ONE method)
+Neither horizon substitutes for the other. Both consume the audited hierarchy when available:
 
-**Option A: via UI** (recommended — easier, no env setup)
-
-Start the app, then go to **Settings** → API Keys → paste your key → Test → Save.
-Keys are stored in your local SQLite DB (`~/.tradingagents/trading_agent.db`).
-
-**Option B: via `.env` file**
-
-```bash
-cp .env.example .env
-# Edit .env and add your key:
-#   ANTHROPIC_API_KEY=sk-ant-api03-...
+```text
+1D dominant trend -> derived 4H structure -> 1H setup -> 15m entry refinement
 ```
 
-### 3. Start everything (one command)
+Missing, stale or conflicting evidence is explicit and fail-closed. Models are not allowed to invent missing timeframe values.
 
-```bash
-./start.sh
+## AI framework
+
+Normal Trade Brain configuration:
+
+- **Groq** primary research/synthesis — `openai/gpt-oss-20b`
+- **Google Gemini** material-finding verifier/challenger — `gemini-3.6-flash`
+- retryable quota/capacity failover between configured providers
+
+LLM output is research evidence/candidate generation only. Exchange calendar, data provenance, broker/funding permission, cost logic and hard risk rules outrank AI opinion.
+
+## Market-data hierarchy
+
+When configured, Zerodha Kite is the preferred **MARKET_DATA_ONLY** transport:
+
+```text
+Kite Historical REST -> audited finalized BSE OHLCV
+Kite WebSocket        -> fresh live BSE quote state
+Kite REST Quote       -> on-demand quote snapshot
 ```
 
-This script:
-- Frees ports 8000 and 3000 if anything's already running
-- Starts the backend (uvicorn) on :8000
-- Starts the frontend (Next.js) on :3000
-- Waits for both to be healthy
-- Opens [http://localhost:3000](http://localhost:3000) in your browser
-- Tails both logs in one terminal (color-coded by service)
-- Cleans up both processes on `Ctrl+C`
+Kite adapters expose no place/modify/cancel-order methods.
 
-Override ports via env vars: `BACKEND_PORT=9000 FRONTEND_PORT=3001 ./start.sh`
+Yahoo/yfinance may be used only as an explicitly labelled fallback/research source where the source policy permits it. It is never silently relabelled as Kite or official exchange truth.
 
-<details>
-<summary>Or start them manually (two terminals)</summary>
+## Evidence and safety plane
 
-```bash
-# Terminal 1 — backend
-uvicorn backend.app:app --reload --port 8000
+Implemented Trade Brain capabilities include:
 
-# Terminal 2 — frontend
-cd frontend && npm install && npm run dev
+- BSE-only scope enforcement at request and live-advisory boundaries
+- official security identity/provenance
+- permanent corporate-event/document memory
+- reviewed/archived official events remain evidence
+- explicit split/dividend normalization without guessed dates/ratios
+- raw-price comparability eras across stock splits; raw OHLC is never rewritten
+- audited RAW_UNADJUSTED OHLCV
+- look-ahead-safe replay
+- strict TP/SL ambiguity handling
+- multi-timeframe, gap, structure, volume and pattern research
+- Focus Instrument Lab
+- frozen challenger / walk-forward validation
+- human-approved soft runtime only
+- verified exchange-calendar/session controls
+- Crash Guard and abnormal-market guards
+- resident equity transaction costs
+- Zerodha MTF incremental funding costs
+- combined SWING MTF target/stop/break-even economics
+- funding-aware MTF paper ledger
+- actual manual trade journal with MTF-aware SWING accounting and partial exits
+- read-only Position Guardian on Actual Trades
+- separate audited NIFTY 50 context-only store
+- after-market study cycle
+- BSE-only browser UI
+- Windows one-button launcher
 
-# Then open http://localhost:3000
-```
-</details>
+Hard rules cannot self-learn. Research may propose evidence; promotion requires chronological validation and explicit human approval.
 
----
+## Corporate-action safety
 
-## How It Works
+Trade Brain stores official corporate-event evidence independently from inbox workflow status.
 
-### The Multi-Agent Pipeline
+- stock splits create raw-price comparability boundaries
+- dividends are ex-date economic context, not split-style structural eras
+- explicit record/ex/payment dates are parsed when stated
+- an ex-date is never guessed from a record date
+- replay and Guardian avoid interpreting mechanical split resets as ordinary losses/stops
 
-```
-Market Analyst → Social Analyst → News Analyst → Fundamentals Analyst
-    ↓  (any subset can be enabled/disabled)
-Bull Researcher ←→ Bear Researcher (debate, 1-3 rounds)
-    ↓
-Research Manager (judge: Buy/Sell/Hold + trading plan)
-    ↓
-Trader (entry/SL/target/position size/time horizon)
-    ↓
-Aggressive ←→ Conservative ←→ Neutral (risk debate, 1-3 rounds)
-    ↓
-Portfolio Manager (final: Strong Buy/Buy/Hold/Sell/Short)
-    ↓
-[Optional after trade closes]
-Reflect & Remember → 5 agent memories updated with actual P&L outcome
-```
+## Broader-market context
 
-### Features — Free vs LLM API Cost
+BSE Ltd remains the only trade target.
 
-> **Note on costs**: The software itself is free and open source. "Cost" below refers to the **LLM API usage fees** you pay directly to your chosen AI provider (Anthropic, OpenAI, Google, etc.) for the features that call their APIs. You bring your own API key. Nothing is charged by this project or its authors — all billing is between you and your LLM provider.
+NIFTY 50 is stored separately as **context-only audited index evidence**. When authenticated Kite data is available, completed NIFTY daily bars can contribute broader-market correction context. If audited NIFTY context is missing, its state stays `UNKNOWN`; Trade Brain does not substitute unaudited web data into a hard live risk gate.
 
-| Feature | Uses LLM API? | Est. Cost per Run | What it does |
-|---------|---------------|-------------------|--------------|
-| **Top Picks** | No | FREE | Ranks NIFTY 50/100/BSE 250 stocks by combined signal strength |
-| **Market Scan** | No | FREE | Finds stocks with gap ups/downs, volume spikes, breakouts |
-| **Strategies** | No | FREE | S/R levels, Pivot Points, Cyclical patterns |
-| **Performance Tracker** | No | FREE | Measures historical win rate of each strategy |
-| **Seasonal Backtest** | No | FREE | Tests "buy in month X, sell in month Y" strategies |
-| **News Feed** | No | FREE | Aggregates Indian market news from RSS + yfinance |
-| **Charts** | No | FREE | Candlestick charts with volume |
-| **Deep Analysis** | Yes | ~Rs.15-60 (~$0.18-0.72 USD) | Full AI pipeline with customizable analysts/depth/language |
-| **AI Backtest** | Yes | ~Rs.15 per date (~$0.18/date) | Runs deep analysis on historical dates |
-| **Reflect & Remember** | Yes | ~Rs.5-10 per trade | Agent learns from your P&L outcome |
+## Actual Trades / Position Guardian
 
-Costs shown assume the default Anthropic Claude setup (Haiku for fast tasks + Sonnet for decisions). Switching to cheaper providers like Gemini Flash or GPT-4o-mini can reduce costs by 3-5x. See [Cost Optimization](#cost-optimization) below.
+The Actual Trades journal records what the human actually did externally at the broker. It does not execute trades.
 
-### Unified Recommendation Engine (FREE)
+For active SWING records, MTF eligibility/funded amount/interest-day information is explicit and MTF financing is included in estimates when required.
 
-Scans all stocks in NIFTY 100 and scores each one:
+Position Guardian uses the manually logged position plus **fresh persisted Kite BSE quote data** and local event/corporate-action/correction context. A missing, malformed or stale live quote fails closed rather than driving stop/target/HOLD interpretation.
 
-**Bullish signals add points:**
-- Volume-confirmed breakout: +3.0
-- Volume spike bullish: +2.0
-- Near major support: +2.0
-- Gap filled (reversal): +1.5
-- RSI oversold: +1.5
-- Cyclical bullish month: +1.5
-- Strong uptrend: +1.0
+## After-market study
 
-**Bearish signals subtract:**
-- Breakdown below support: -2.5
-- Volume spike bearish: -2.0
-- Near major resistance: -1.5
-- RSI overbought: -1.0
-- Strong downtrend: -1.0
+The operating design separates market-session advisory work from post-market study/replay. The after-market study cycle can refresh audited BSE datasets, multi-timeframe evidence, pattern/structure research, news memory and optional audited NIFTY context. It cannot silently mutate hard rules or create broker authority.
 
-Ratings: STRONG BUY (score ≥ +4), BUY (+2 to +4), SELL (-2 to -4), STRONG SELL (≤ -4).
+## Validation
 
-Success probability: 50% baseline + 4% per score point + 2% per aligned signal (capped at 85%).
+GitHub Actions validates:
 
-### Smart Filters Layered on Top (FREE)
+- Python integration compilation
+- the complete `tests/test_tradebrain_*.py` suite with **pytest** (including `unittest.TestCase` and pytest-style modules)
+- observational Phase 2/3/4/5/6/10 smokes after the regression suite passes
+- production Next.js build
+- frontend production dependency security audit
+- Windows PowerShell/BAT syntax, prerequisites and clean first-run backend/frontend health smoke
 
-Two market-wide filters automatically adjust every recommendation before showing it to you:
+A green software test suite supports tested code/contract correctness. It does **not** prove market edge or future profitability.
 
-**1. FII/DII Institutional Flow** — In Indian markets, the single biggest predictor of next-day direction:
+## Local setup
 
-| Today's Flow | Score Adjustment | Effect |
-|-------------|------------------|--------|
-| FII selling > Rs.2,000 Cr | -1.5 | Demotes BUYs to NEUTRAL |
-| FII selling > Rs.1,000 Cr | -1.0 | Reduces conviction |
-| FII buying > Rs.2,000 Cr | +1.5 | Promotes BUYs to STRONG BUY |
-| FII buying > Rs.1,000 Cr | +1.0 | Adds tailwind |
-| DIIs partially offsetting | +0.5x reduction | "Mixed" bias |
+Use the Windows launcher for the intended operator path:
 
-Live data via NSE (cached 1 hour). Falls back to manual entry if scraping fails.
-
-**2. Earnings + Economic Calendar** — Avoids trading into known volatility:
-
-| Event in Next N Days | Score Penalty |
-|---------------------|---------------|
-| Stock earnings (≤2 days) | -2.5 |
-| Union Budget (≤1 day) | -2.0 |
-| RBI Monetary Policy (today) | -1.5 |
-| US Fed FOMC (today) | -1.0 |
-| F&O monthly expiry (today) | -0.5 |
-
-Hardcoded RBI/Budget/Fed dates (published yearly). Per-stock earnings dates pulled from yfinance.
-
-**3. Sector Concentration Checker** — Prevents over-exposure to one sector:
-
-| State | Penalty |
-|-------|---------|
-| Adding trade would breach 30% sector limit | -1.5 |
-| Adding trade would exceed 3 positions per sector | -1.5 |
-| Approaching 80% of limit | -0.5 |
-
-Tracks paper trades + open analysis trades. Stops AI from giving you 5 STRONG BUYs all in IT sector (which would be one concentrated bet, not five separate trades).
-
-**Real example:** On a day when FIIs sold Rs.8,000 Cr and INFY has earnings tomorrow:
-- Pure technical score: STRONG BUY (+5.0)
-- After FII filter: BUY (+3.5)
-- After earnings filter: NEUTRAL (+1.0) — filtered out
-
-This prevents the most common AI trading mistakes: trading against institutional flow + trading into earnings volatility + accidental sector concentration.
-
-### The Daily Verdict (top of Dashboard)
-
-All 3 filters above plus a live HIGH-conviction setup count are synthesized into a **single decision** at the top of the Dashboard.
-
-**The 4 inputs** (each contributes a caution flag, favorable flag, or nothing):
-
-| # | Input | Source | Triggers |
-|---|-------|--------|----------|
-| 1 | FII/DII flow | live NSE via `nsepython` | Caution if FIIs net sellers · Favorable if heavy buyers |
-| 2 | Calendar events (next 3 days) | hardcoded RBI/Budget/Fed + yfinance earnings | Caution for FOMC ≤2 days, RBI ≤1 day, Budget ≤1 day, F&O expiry today |
-| 3 | Sector concentration | open paper + analysis trades | Caution if portfolio at sector limit (3 positions or 30% capital) |
-| 4 | HIGH-conviction setup count | recommender on NIFTY 50 | Favorable if ≥3 STRONG BUY+HIGH · Caution if 0 |
-
-**Decision table** (`backend/daily_verdict.py:130-178`):
-
-| Caution | Favorable | Verdict | Position Size | Max Trades | Min Conviction |
-|--------:|----------:|---------|--------------:|-----------:|----------------|
-| ≥3 | any | 🔴 RED — Skip the day | 0% | 0 | HIGH |
-| 2 | any | 🔴 RED — Stand down | 0% | 0 | HIGH |
-| 1 | 0 | 🟡 YELLOW — Selective | 50% | 2 | HIGH |
-| 1 | ≥1 | 🟡 YELLOW — Selective | 75% | 3 | HIGH |
-| 0 | ≥2 | 🟢 GREEN — Aggressive | 100% | 5 | MEDIUM |
-| 0 | 1 | 🟢 GREEN — Trade normally | 100% | 4 | MEDIUM |
-| 0 | 0 | 🟡 YELLOW — Quiet day | 75% | 2 | HIGH |
-
-Caution is weighted over favorability deliberately — losing money to an unexpected FOMC reaction is worse than missing one good day.
-
-The card shows: position size %, max trades, min conviction, the specific action (*"Don't open new positions. Manage existing only."*), and every flag with reasoning.
-
-This is the **"what do I actually do today?"** answer — eliminates daily decision paralysis.
-
-### The Feedback Loop (closes the learning cycle)
-
-The system improves itself from real trade outcomes. Two pages drive this:
-
-#### 📈 Signal Performance — auto-tunes the recommender
-
-Every paper trade stores which signals fired (`triggered_signals` JSON). After 5-day P&L is known, each signal is credited or blamed for the outcome (multi-attribution — every signal in a trade gets one observation).
-
-Aggregated stats per signal:
-
-| Stat | Meaning |
-|------|---------|
-| `n` | Number of closed trades the signal appeared in |
-| `win_rate` | Raw fraction that won |
-| `wilson_lower_80` | Honest lower bound at 80% confidence — handles small samples |
-| `avg_return_5d_pct` | Mean realized return when the signal fired |
-| `suggested_weight` | New weight derived from Wilson lower bound |
-| `verdict` | `TUNE_UP` / `TUNE_DOWN` / `KEEP` / `INSUFFICIENT_DATA` |
-
-Suggestion formula preserves direction (a bullish signal stays bullish) and scales magnitude by `(wilson - 0.30) / 0.20`, capped at 2.5×. Minimum 10 trades per signal before any change is suggested — below that, data is too noisy.
-
-Click **Apply Suggested Weights** to persist overrides into the `settings` table. The recommender's `_refresh_active_weights()` reloads them at the start of every `recommend()` call. **The engine literally rewrites itself from your trade outcomes.**
-
-#### 🎯 Verdict Calibration — grades the daily verdict
-
-Every dashboard load snapshots today's verdict + Nifty close into `verdict_history`. After 1/3/5 trading days, forward closes backfill and outcomes are classified:
-
-| Verdict | Correct when | Wrong when |
-|---------|--------------|------------|
-| GREEN | Nifty return > +0.10% | < -0.10% |
-| RED | Nifty return < -0.10% | > +0.10% |
-| YELLOW | abs(return) ≤ 0.50% (quiet day) | > 0.50% |
-
-Accuracy = `correct / (correct + wrong)`. Neutrals are excluded so ±0.05% noise doesn't pollute the score.
-
-After ~30 days of data, the calibration table reveals whether the headline filter is genuinely predictive or whether thresholds need retuning. Example output:
-
-```
-GREEN  8 days  +0.4% avg 5d  67% accuracy  ✓ trustworthy
-YELLOW 9 days  +0.1% avg 5d  71% quiet-day accuracy  ✓ identifies low-edge days
-RED    5 days  +0.3% avg 5d  40% accuracy  ✗ over-cautious — loosen thresholds
+```text
+Start-TradeBrain.bat
 ```
 
-Both pages live under **VALIDATE** in the sidebar. Together they close the full loop: real trades → measured outcomes → updated weights + calibrated thresholds → smarter recommendations.
+AI-powered analysis requires the chosen provider keys locally. Authenticated Kite market data requires local Kite credentials/access token. Never commit real credentials.
 
-#### ⚡ Market Regime Classifier — conditional signal performance
+See:
 
-Solves the "signal averaging" problem: a signal might win 70% in bull markets and 35% in bear, but the lifetime average of 52% is mush.
+- `PROJECT_STATE.md`
+- `TRADEBRAIN_REFRAME.md`
+- `TRADEBRAIN_RUNTIME_REQUIREMENTS.md`
+- `TRADEBRAIN_KITE_DATA.md`
+- `TRADEBRAIN_ACTUAL_TRADES.md`
+- `TRADEBRAIN_PHASE6.md`
+- `WINDOWS_SETUP.md`
 
-Every trading day is classified into one of four regimes:
+## Evidence boundary
 
-| Regime | Trigger | What it means for trading |
-|--------|---------|---------------------------|
-| 🟢 **BULL** | Nifty > 50 SMA > 200 SMA, normal vol | Trend favors longs. Breakout signals reliable. |
-| 🔴 **BEAR** | Nifty < 50 SMA < 200 SMA, normal vol | Trend favors shorts. Bounce signals fail more often. |
-| 🟡 **SIDEWAYS** | SMAs not aligned (mixed trend) | Range-bound. Mean-reversion works, breakouts fakeout. |
-| 🟣 **HIGH_VOL** | Realized 20d vol > 1.5× the 120d baseline | Extreme moves dominate. Reduce size, most signals less reliable. Overrides the trend label. |
+`BSE_PROSPECTIVE_HYPOTHESIS_001` is frozen for future-only validation after **2026-08-21**. Historical observations used to generate the hypothesis cannot be backfilled as untouched validation evidence.
 
-The Dashboard has a color-coded **Regime Badge** showing today's classification + the volatility readout (e.g., *"Vol 18.5% (baseline 10.4%)"*).
-
-Every paper trade is tagged with `regime_at_entry` automatically. The `/signals` page splits each signal's win rate by regime in a 4-column grid:
-
-```
-Signal                      BULL    BEAR    SIDE    HIGH    Spread
-Volume Spike (Bullish)      75%     25%     57%     43%     50%   ⚡ regime-dependent
-                            (12)    (4)     (7)     (8)
-Breakout (Vol Confirmed)    72%     65%     68%     58%     14%   works across regimes
-                            (15)    (8)     (9)     (12)
-```
-
-Signals with **spread > 20%** (and n≥5 in 2+ regimes) are flagged ⚡ **regime-dependent** — meaning the blanket weight in the main signal table is misleading. You should only act on these signals when the favorable regime is active.
-
-How to use it day-to-day:
-
-1. Glance at the Dashboard regime badge before trading.
-2. Open `/signals`, scroll to the regime breakdown.
-3. For each ⚡ signal you care about, note which regime it works in.
-4. Manually skip those signals when the wrong regime is active.
-
-**Conditional regime weights are now live** (Tier 4.1) — when you click *Apply All Regime Suggestions* on `/signals`, the recommender automatically picks per-regime overrides at runtime based on today's regime. See the next subsection.
-
-#### 🎚️ Conditional Regime Weights — three-layer merge
-
-The recommender now resolves weights at runtime through three layers:
-
-```
-1. DEFAULT_WEIGHTS              ← hardcoded baseline
-2. recommender_tuned_weights    ← Tier 1.1: global signal tuning
-3. recommender_regime_weights[current_regime]  ← Tier 4.1: conditional
-```
-
-Each layer can override the previous one. Today's regime is detected automatically (BULL / BEAR / SIDEWAYS / HIGH_VOL) and the matching layer-3 dict is applied.
-
-**When are regime overrides suggested?** Conservatively — the system only proposes a regime-specific weight when ALL of:
-- `n ≥ 5` trades observed in that regime for the signal
-- Wilson lower bound differs from 50% by more than 10%
-- Suggested weight differs from the base by more than 0.25
-
-This prevents overreaction from small samples while still surfacing genuine regime-conditional behavior.
-
-**Example flow:**
-
-```
-Today: HIGH_VOL regime
-  Base tuned weight: rsi_overbought = -1.0
-  HIGH_VOL data: 5 trades, 40% win rate (Wilson 18%)
-  → Suggested override: -1.0 → 0.0 (signal is unreliable in HIGH_VOL)
-  → After Apply: recommender ignores rsi_overbought today only
-
-Tomorrow: regime shifts to BULL
-  → recommender automatically reverts to base weight (-1.0)
-  → BULL-specific overrides (if any exist) apply instead
-```
-
-The Dashboard's Top Picks header shows the active regime + override count: `NIFTY100 · HIGH_VOL ⚡3` means 3 regime-specific overrides are active right now. Hover over the badge for details.
-
-#### 🧠 Memory Pruning + Decay (Tier 4.2)
-
-Each AI agent (Bull, Bear, Trader, Judge, Portfolio Manager) keeps a journal of past situations + lessons in BM25-indexed JSON files at `~/.tradingagents/memory/`. When a new analysis runs, the most lexically-similar past lessons get retrieved and injected into the prompt as context.
-
-The risk: **stale lessons pollute decisions.** A 2024 bull-market lesson ("buy IT on dollar weakness") may be wrong in a 2026 bear regime. BM25 alone has no concept of staleness.
-
-Tier 4.2 fixes this with two mechanisms:
-
-**1. Automatic age-based decay** — Every retrieval applies a multiplier:
-
-```
-final_score = max(0, BM25_score) × decay_factor
-
-decay_factor:
-  age ≤ 30 days     → 1.00 (full weight)
-  30 < age ≤ 365    → linear decay 1.00 → 0.20
-  age > 365 days    → 0.20 (floor)
-  + 1.25× bonus if accessed in last 7 days (frecency)
-```
-
-So a 30-day-old lesson with BM25 score 8 wins over a 400-day-old lesson with score 9, even though the older one matched slightly better lexically.
-
-**2. Manual pruning** at `/memory-admin`:
-
-| Criterion | What it removes |
-|-----------|-----------------|
-| `max_age_days` | Hard cutoff (e.g., 540 = drop entries older than 18 months) |
-| `min_hits` | Entries past the 30-day grace period that have been retrieved fewer than N times — catches lessons that turned out to be irrelevant |
-| `min_decay` | Entries whose current decay is below this floor (e.g., 0.30) |
-
-Always run **dry-run** first to preview. Pruning is irreversible.
-
-The page also exposes per-agent stats (active / decayed / stale / never_hit) and lets you delete individual entries by index. Pre-existing memory files auto-migrate on first load — they're stamped with the current timestamp and zero hit count, so legacy data is preserved but starts collecting metadata going forward.
-
-#### ⚖️ Confidence Calibration — Brier score
-
-The recommender attaches a `success_probability` (e.g., 65%) to every pick. This page checks whether that number is *honest* — when it says 65%, do trades actually win 65% of the time?
-
-**Brier score** is the single-number measure:
-
-```
-brier = mean((predicted_prob - actual_outcome)²)
-```
-
-Lower is better. Reference points:
-
-| Brier | Quality |
-|-------|---------|
-| ≤ 0.15 | excellent |
-| ≤ 0.20 | good |
-| ≤ 0.25 | fair (always-predict-50% baseline) |
-| > 0.25 | poor — worse than random |
-
-**Reliability diagram** bins trades by predicted probability (50–60%, 60–70%, …) and shows actual win rate per bucket. Perfect calibration = bars match the bucket midpoint. Overconfidence shows as bars *below* (engine claims 70%, reality is 55%). Underconfidence is the opposite.
-
-**Verdict** compares overall predicted vs actual:
-
-- **Overconfident** (gap < -5%): mentally derate displayed probabilities. Engine says 70% with -10% gap → treat as 60%.
-- **Underconfident** (gap > +5%): trust the engine more on high-prob calls; you can size up.
-- **Well-calibrated** (|gap| ≤ 5%): the numbers are honest, use them as-is.
-
-After ~50 closed trades the picture stabilizes. Re-check monthly — calibration drifts as the engine's input distribution shifts.
-
-#### 👁️ Shadow Trades — counterfactual learning
-
-Without this, you only learn from picks you took. Every winner you skipped is invisible — false negatives that quietly poison your filtering instincts.
-
-Every time the recommender produces a STRONG BUY (or HIGH-confidence BUY), the system **auto-records it as a shadow trade** regardless of whether you clicked Track. After 1/3/5/10 trading days, actual P&L backfills via yfinance.
-
-The page splits stats into 4 buckets:
-
-| Bucket | What it measures |
-|--------|------------------|
-| All shadow trades | Recommender's true win rate, independent of user behavior |
-| You tracked | Subset where you opened a paper trade |
-| You **skipped** | Subset where you didn't act |
-| STRONG BUYs only | Highest-conviction picks separated from BUYs |
-
-**Filter verdict** compares skipped vs tracked win rate:
-
-- **Filter helps** (skipped < tracked by 10%+): your selectivity is adding value
-- **Filter neutral** (within 10%): no measurable edge yet
-- **Filter HURTS** (skipped > tracked by 10%+): you're systematically skipping winners — trust the recommender more
-
-The trade table shows every shadow with its regime tag and per-horizon P&L. Rows where `user_tracked = ✗` and 5d P&L is large positive are the most painful — picks you skipped that turned into winners. Reviewing these reveals what your gut filter is missing.
-
----
-
-## Project Structure
-
-```
-.
-├── tradingagents/              # Core AI pipeline (adapted from TauricResearch/TradingAgents)
-│   ├── agents/                 # Analysts, researchers, trader, risk debators, portfolio manager
-│   ├── dataflows/              # yfinance, alpha_vantage, NSE data adapters
-│   ├── graph/                  # LangGraph orchestration
-│   ├── llm_clients/            # Multi-provider LLM factory
-│   ├── utils/                  # Indian market utilities (ticker, calendar)
-│   └── default_config.py
-│
-├── backend/                    # FastAPI REST + WebSocket API (NEW)
-│   ├── app.py                  # Entry point
-│   ├── db.py                   # SQLite: watchlist, history, backtests, settings
-│   ├── scanner.py              # Gap / Volume / Breakout detection
-│   ├── recommender.py          # Unified signal scoring engine
-│   ├── performance.py          # Strategy win rate measurement
-│   ├── cyclical.py             # Seasonality, sector rotation
-│   ├── backtest_engine.py      # Historical P&L testing
-│   ├── news_sources.py         # RSS + yfinance news aggregator
-│   ├── stats_callback.py       # Token + cost tracking
-│   ├── settings_manager.py     # API key storage + LLM config
-│   └── routers/                # API endpoints per feature
-│
-├── frontend/                   # Next.js 16 trading terminal UI (NEW)
-│   ├── src/app/                # Pages: dashboard, analysis, scanner, strategies, etc.
-│   ├── src/components/         # UI components (shadcn/ui + custom)
-│   ├── src/lib/                # API client, Zustand store, types
-│   └── src/hooks/
-│
-├── cli/                        # Interactive CLI (from original repo)
-├── README.md
-├── NOTICE                      # Attribution
-├── LICENSE                     # Apache 2.0
-├── pyproject.toml
-└── .env.example
-```
-
----
-
-## Tech Stack
-
-**Backend:**
-- Python 3.10+
-- LangGraph (multi-agent orchestration)
-- LangChain (LLM integrations)
-- FastAPI + Uvicorn
-- SQLite (local storage)
-- yfinance (free stock data)
-- feedparser (RSS parsing)
-
-**Frontend:**
-- Next.js 16 (App Router)
-- TypeScript
-- Tailwind CSS
-- shadcn/ui (component library)
-- TradingView lightweight-charts
-- Zustand (state management)
-
-**LLM Providers Supported:**
-- Anthropic Claude (default — Haiku + Sonnet mix for cost efficiency)
-- OpenAI GPT
-- Google Gemini
-- xAI Grok
-- DeepSeek
-- Qwen
-
----
-
-## Cost Optimization
-
-The default configuration uses a **cost-efficient model mix**:
-- **Haiku 4.5** for 13 fast tasks (analyst tool-calls, debates, risk analysis)
-- **Sonnet 4** for 2 critical decision points (Research Manager, Portfolio Manager)
-
-**Typical cost per analysis:**
-
-| Config | Cost | Duration |
-|--------|------|----------|
-| Minimal (Market only, Shallow, English) | ~Rs.8-12 | ~1 min |
-| Balanced (all 4 analysts, Shallow) | ~Rs.15-25 | 2-3 min |
-| Full (all 4 analysts, Deep 3 rounds) | ~Rs.50-70 | 4-6 min |
-
-Switch providers (OpenAI GPT-5.4-mini, Gemini Flash) for even cheaper analyses (~Rs.3-8 per analysis).
-
----
-
-## Security & Privacy
-
-- **All data stays local**: SQLite DB at `~/.tradingagents/trading_agent.db`, memory files at `~/.tradingagents/memory/`
-- **API keys never transmitted**: stored locally, sent only to your chosen LLM provider directly
-- **No tracking, no telemetry, no ads**
-- **Masked display**: API keys in the Settings UI show only first 10 and last 4 characters
-
----
-
-## Roadmap
-
-### Implemented ✅
-- [x] Full multi-agent AI pipeline adapted for Indian markets
-- [x] Web UI with Dashboard, Scanner, Strategies, Analysis, Backtest, etc.
-- [x] Unified recommendation engine
-- [x] **Daily Trading Verdict** (synthesizes all filters into TRADE/SELECTIVE/STAND DOWN)
-- [x] **FII/DII daily flow tracker** (live NSE data, integrated as recommendation filter)
-- [x] **Earnings + Economic Calendar** (RBI/Budget/Fed/expiry/earnings filters)
-- [x] **Sector Concentration Checker** (max 3 positions, 30% capital per sector)
-- [x] **Signal Performance Tracker** (auto-tunes recommender weights from real outcomes)
-- [x] **Verdict Calibration** (grades daily verdict against actual Nifty moves at 1/3/5d horizons)
-- [x] **Market Regime Classifier** (BULL/BEAR/SIDEWAYS/HIGH_VOL tagging on every trade + conditional signal stats)
-- [x] **Confidence Calibration** (Brier score + reliability diagram for the recommender's success_probability)
-- [x] **Shadow Trades** (counterfactual auto-tracking of every STRONG BUY regardless of user action)
-- [x] **Conditional Regime Weights** (recommender auto-picks per-regime weight layer at runtime)
-- [x] **Memory Pruning + Decay** (BM25 memories with age-based decay multiplier + admin UI)
-- [x] Strategy performance tracker
-- [x] Paper trading simulation (multi-horizon P&L tracking)
-- [x] Historical recommender backtest
-- [x] Learning insights (pattern analysis on user trades)
-- [x] Cyclical pattern analysis + seasonal backtest
-- [x] P&L tracking with agent learning (Reflect & Remember)
-- [x] Memory persistence across sessions
-- [x] Customizable news feed (RSS + yfinance)
-- [x] Position Size Calculator
-- [x] Sector Heatmap
-- [x] Open/Closed trades separation
-- [x] Watchlist alerts on Top Picks matches
-- [x] API key management via UI
-- [x] Multi-LLM provider support
-- [x] Cost tracking per analysis
-
-### Pre-Kite Hardening
-- [x] Sector concentration checker
-- [x] Daily Verdict synthesizer
-- [ ] Phase 4a: Zerodha Kite read-only sync (live portfolio + margin)
-- [ ] Phase 4b: One-click order placement with bracket SL/target
-
-### Future
-- [ ] Options & Futures analyzer (derivatives agent, option chains, Greeks, PCR)
-- [ ] Real-time intraday signal loop (auto-scan during market hours)
-- [ ] Promoter activity tracker (NSE bulk/block deals)
-- [ ] Comparative analysis (side-by-side stock comparison)
-- [ ] Trade journal with notes
-- [ ] Mobile responsive UI
-- [ ] Dark mode toggle
-- [ ] Export analyses as PDF
-- [ ] Daily email/Telegram briefing
-
----
-
-## Contributing
-
-Contributions welcome! Areas that need work:
-
-- Indian market-specific data sources (NSE scraping for bulk/block deals, delivery %, promoter activity)
-- Options/F&O analyzer (Phase 3)
-- Kite API integration (Phase 4)
-- More RSS sources, better news deduplication
-- Additional strategies (VWAP, ORB intraday, momentum breakouts)
-- Testing infrastructure
-
-Please ensure:
-1. No API keys or secrets committed
-2. Code follows existing patterns (see `CLAUDE.md`)
-3. New features have user-facing documentation (help sections)
-
----
-
-## License
-
-Apache License 2.0 — see [LICENSE](./LICENSE) file.
-
-This project builds on the Apache 2.0-licensed [TradingAgents](https://github.com/TauricResearch/TradingAgents) framework. See [NOTICE](./NOTICE) for attribution details.
-
-### Data Sources & Terms
-
-The code is Apache-2.0, but the **data** it accesses at runtime carries each source's own terms — review these before any **commercial** use:
-
-- **Market / price / news data — Yahoo Finance (via `yfinance`).** The library is Apache-2.0, but the underlying data is Yahoo's, intended for **personal / research use** and not licensed for commercial redistribution. For commercial use, switch to a licensed market-data vendor (or your broker's API).
-- **Ticker search — Yahoo Finance.** Stock name/ticker lookup uses Yahoo's search (via `yfinance`, the same source as prices) — always current, with **no NSE list bundled or fetched**. A small curated list is the offline fallback. Individual facts (symbols, names) are public.
-- **FII/DII data — `nsepython` (optional).** `nsepython` is **GPL-licensed** and is **not** a declared dependency; it's imported lazily and only if you install it, with a manual-entry fallback. This keeps the core project free of GPL obligations.
-- **News — RSS aggregation.** Only headlines + short summaries + links back to the source are stored; full articles are not reproduced.
-- **Charts — TradingView Lightweight Charts™** (Apache-2.0), attributed on the Charts page per its license.
-
----
-
-## Acknowledgments
-
-- **[TauricResearch](https://github.com/TauricResearch)** for the excellent TradingAgents framework. Without their work, this project would not exist. Please star their [original repo](https://github.com/TauricResearch/TradingAgents).
-- The LangChain and LangGraph teams for the agent orchestration framework.
-- Yahoo Finance for providing free Indian market data via yfinance.
-- All the open-source libraries that power this project.
-
----
-
-## Disclaimer (again, because it matters)
-
-This software is provided **"as-is"** without warranty of any kind. The AI models can and do make mistakes, especially around:
-- Sudden market events (RBI announcements, global shocks)
-- Illiquid or penny stocks
-- Options/derivatives analysis
-- Tax and regulatory implications
-
-**Always**:
-- Validate AI recommendations against your own research
-- Use stop-losses (the AI suggests them; actually place them)
-- Never risk more than 1-2% of capital per trade
-- Start with paper trading or very small positions
-- Consult a SEBI-registered investment advisor for personalized advice
-
-Trading in financial markets carries substantial risk. Past performance — whether historical backtests or agent learning — does not guarantee future results.
+PR #1 intentionally remains **OPEN, DRAFT and UNMERGED**. Do not merge into `main` unless the owner explicitly requests it.

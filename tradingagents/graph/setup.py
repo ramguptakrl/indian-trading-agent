@@ -10,8 +10,18 @@ from tradingagents.agents.utils.agent_states import AgentState
 from .conditional_logic import ConditionalLogic
 
 
+GRAPH_MODE_FULL = "FULL"
+GRAPH_MODE_SHARED_RESEARCH_ONLY = "SHARED_RESEARCH_ONLY"
+GRAPH_MODE_DECISION_FROM_SHARED_RESEARCH = "DECISION_FROM_SHARED_RESEARCH"
+_ALLOWED_GRAPH_MODES = {
+    GRAPH_MODE_FULL,
+    GRAPH_MODE_SHARED_RESEARCH_ONLY,
+    GRAPH_MODE_DECISION_FROM_SHARED_RESEARCH,
+}
+
+
 class GraphSetup:
-    """Handles the setup and configuration of the agent graph."""
+    """Handles setup of full, shared-research, and horizon-decision graphs."""
 
     def __init__(
         self,
@@ -24,8 +34,8 @@ class GraphSetup:
         invest_judge_memory,
         portfolio_manager_memory,
         conditional_logic: ConditionalLogic,
+        config: Dict[str, Any] | None = None,
     ):
-        """Initialize with required components."""
         self.quick_thinking_llm = quick_thinking_llm
         self.deep_thinking_llm = deep_thinking_llm
         self.tool_nodes = tool_nodes
@@ -35,167 +45,170 @@ class GraphSetup:
         self.invest_judge_memory = invest_judge_memory
         self.portfolio_manager_memory = portfolio_manager_memory
         self.conditional_logic = conditional_logic
+        self.config = config or {}
 
     def setup_graph(
         self, selected_analysts=["market", "social", "news", "fundamentals"]
     ):
-        """Set up and compile the agent workflow graph.
+        """Compile the configured Trade Brain graph stage.
 
-        Args:
-            selected_analysts (list): List of analyst types to include. Options are:
-                - "market": Market analyst
-                - "social": Social media analyst
-                - "news": News analyst
-                - "fundamentals": Fundamentals analyst
+        FULL preserves the legacy one-horizon pipeline.
+        SHARED_RESEARCH_ONLY runs the selected analyst/tool chain once and stops.
+        DECISION_FROM_SHARED_RESEARCH starts at Bull Researcher and expects the caller
+        to prefill market/news/social/fundamentals reports in the initial state.
         """
-        if len(selected_analysts) == 0:
+        graph_mode = str(self.config.get("graph_mode") or GRAPH_MODE_FULL).strip().upper()
+        if graph_mode not in _ALLOWED_GRAPH_MODES:
+            raise ValueError(f"Unsupported Trade Brain graph_mode: {graph_mode}")
+
+        needs_analysts = graph_mode in {GRAPH_MODE_FULL, GRAPH_MODE_SHARED_RESEARCH_ONLY}
+        needs_decision = graph_mode in {GRAPH_MODE_FULL, GRAPH_MODE_DECISION_FROM_SHARED_RESEARCH}
+
+        if needs_analysts and len(selected_analysts) == 0:
             raise ValueError("Trading Agents Graph Setup Error: no analysts selected!")
 
-        # Create analyst nodes
         analyst_nodes = {}
         delete_nodes = {}
         tool_nodes = {}
 
-        if "market" in selected_analysts:
-            analyst_nodes["market"] = create_market_analyst(
-                self.quick_thinking_llm
-            )
+        if needs_analysts and "market" in selected_analysts:
+            analyst_nodes["market"] = create_market_analyst(self.quick_thinking_llm)
             delete_nodes["market"] = create_msg_delete()
             tool_nodes["market"] = self.tool_nodes["market"]
 
-        if "social" in selected_analysts:
-            analyst_nodes["social"] = create_social_media_analyst(
-                self.quick_thinking_llm
-            )
+        if needs_analysts and "social" in selected_analysts:
+            analyst_nodes["social"] = create_social_media_analyst(self.quick_thinking_llm)
             delete_nodes["social"] = create_msg_delete()
             tool_nodes["social"] = self.tool_nodes["social"]
 
-        if "news" in selected_analysts:
-            analyst_nodes["news"] = create_news_analyst(
-                self.quick_thinking_llm
-            )
+        if needs_analysts and "news" in selected_analysts:
+            analyst_nodes["news"] = create_news_analyst(self.quick_thinking_llm)
             delete_nodes["news"] = create_msg_delete()
             tool_nodes["news"] = self.tool_nodes["news"]
 
-        if "fundamentals" in selected_analysts:
-            analyst_nodes["fundamentals"] = create_fundamentals_analyst(
-                self.quick_thinking_llm
-            )
+        if needs_analysts and "fundamentals" in selected_analysts:
+            analyst_nodes["fundamentals"] = create_fundamentals_analyst(self.quick_thinking_llm)
             delete_nodes["fundamentals"] = create_msg_delete()
             tool_nodes["fundamentals"] = self.tool_nodes["fundamentals"]
 
-        # Create researcher and manager nodes
-        bull_researcher_node = create_bull_researcher(
-            self.quick_thinking_llm, self.bull_memory
-        )
-        bear_researcher_node = create_bear_researcher(
-            self.quick_thinking_llm, self.bear_memory
-        )
-        research_manager_node = create_research_manager(
-            self.deep_thinking_llm, self.invest_judge_memory
-        )
-        trader_node = create_trader(self.quick_thinking_llm, self.trader_memory)
-
-        # Create risk analysis nodes
-        aggressive_analyst = create_aggressive_debator(self.quick_thinking_llm)
-        neutral_analyst = create_neutral_debator(self.quick_thinking_llm)
-        conservative_analyst = create_conservative_debator(self.quick_thinking_llm)
-        portfolio_manager_node = create_portfolio_manager(
-            self.deep_thinking_llm, self.portfolio_manager_memory
-        )
-
-        # Create workflow
         workflow = StateGraph(AgentState)
 
-        # Add analyst nodes to the graph
-        for analyst_type, node in analyst_nodes.items():
-            workflow.add_node(f"{analyst_type.capitalize()} Analyst", node)
-            workflow.add_node(
-                f"Msg Clear {analyst_type.capitalize()}", delete_nodes[analyst_type]
+        if needs_analysts:
+            for analyst_type, node in analyst_nodes.items():
+                workflow.add_node(f"{analyst_type.capitalize()} Analyst", node)
+                workflow.add_node(
+                    f"Msg Clear {analyst_type.capitalize()}", delete_nodes[analyst_type]
+                )
+                workflow.add_node(f"tools_{analyst_type}", tool_nodes[analyst_type])
+
+        if needs_decision:
+            # These nodes are intentionally instantiated separately for each horizon graph.
+            # They consume the same immutable research pack but retain horizon-specific
+            # prompts, debate state, trader state, risk debate, and final portfolio verdict.
+            requested_trade_mode = self.config.get("requested_trade_mode")
+            bull_researcher_node = create_bull_researcher(
+                self.quick_thinking_llm, self.bull_memory
             )
-            workflow.add_node(f"tools_{analyst_type}", tool_nodes[analyst_type])
+            bear_researcher_node = create_bear_researcher(
+                self.quick_thinking_llm, self.bear_memory
+            )
+            research_manager_node = create_research_manager(
+                self.deep_thinking_llm,
+                self.invest_judge_memory,
+                requested_trade_mode=requested_trade_mode,
+            )
+            trader_node = create_trader(
+                self.quick_thinking_llm,
+                self.trader_memory,
+                requested_trade_mode=requested_trade_mode,
+            )
+            aggressive_analyst = create_aggressive_debator(self.quick_thinking_llm)
+            neutral_analyst = create_neutral_debator(self.quick_thinking_llm)
+            conservative_analyst = create_conservative_debator(self.quick_thinking_llm)
+            portfolio_manager_node = create_portfolio_manager(
+                self.deep_thinking_llm,
+                self.portfolio_manager_memory,
+                requested_trade_mode=requested_trade_mode,
+            )
 
-        # Add other nodes
-        workflow.add_node("Bull Researcher", bull_researcher_node)
-        workflow.add_node("Bear Researcher", bear_researcher_node)
-        workflow.add_node("Research Manager", research_manager_node)
-        workflow.add_node("Trader", trader_node)
-        workflow.add_node("Aggressive Analyst", aggressive_analyst)
-        workflow.add_node("Neutral Analyst", neutral_analyst)
-        workflow.add_node("Conservative Analyst", conservative_analyst)
-        workflow.add_node("Portfolio Manager", portfolio_manager_node)
+            workflow.add_node("Bull Researcher", bull_researcher_node)
+            workflow.add_node("Bear Researcher", bear_researcher_node)
+            workflow.add_node("Research Manager", research_manager_node)
+            workflow.add_node("Trader", trader_node)
+            workflow.add_node("Aggressive Analyst", aggressive_analyst)
+            workflow.add_node("Neutral Analyst", neutral_analyst)
+            workflow.add_node("Conservative Analyst", conservative_analyst)
+            workflow.add_node("Portfolio Manager", portfolio_manager_node)
 
-        # Define edges
-        # Start with the first analyst
-        first_analyst = selected_analysts[0]
-        workflow.add_edge(START, f"{first_analyst.capitalize()} Analyst")
+        if graph_mode == GRAPH_MODE_DECISION_FROM_SHARED_RESEARCH:
+            workflow.add_edge(START, "Bull Researcher")
+        else:
+            first_analyst = selected_analysts[0]
+            workflow.add_edge(START, f"{first_analyst.capitalize()} Analyst")
 
-        # Connect analysts in sequence
-        for i, analyst_type in enumerate(selected_analysts):
-            current_analyst = f"{analyst_type.capitalize()} Analyst"
-            current_tools = f"tools_{analyst_type}"
-            current_clear = f"Msg Clear {analyst_type.capitalize()}"
+            for i, analyst_type in enumerate(selected_analysts):
+                current_analyst = f"{analyst_type.capitalize()} Analyst"
+                current_tools = f"tools_{analyst_type}"
+                current_clear = f"Msg Clear {analyst_type.capitalize()}"
 
-            # Add conditional edges for current analyst
+                workflow.add_conditional_edges(
+                    current_analyst,
+                    getattr(self.conditional_logic, f"should_continue_{analyst_type}"),
+                    [current_tools, current_clear],
+                )
+                workflow.add_edge(current_tools, current_analyst)
+
+                if i < len(selected_analysts) - 1:
+                    next_analyst = f"{selected_analysts[i+1].capitalize()} Analyst"
+                    workflow.add_edge(current_clear, next_analyst)
+                elif graph_mode == GRAPH_MODE_SHARED_RESEARCH_ONLY:
+                    workflow.add_edge(current_clear, END)
+                else:
+                    workflow.add_edge(current_clear, "Bull Researcher")
+
+        if needs_decision:
             workflow.add_conditional_edges(
-                current_analyst,
-                getattr(self.conditional_logic, f"should_continue_{analyst_type}"),
-                [current_tools, current_clear],
+                "Bull Researcher",
+                self.conditional_logic.should_continue_debate,
+                {
+                    "Bear Researcher": "Bear Researcher",
+                    "Research Manager": "Research Manager",
+                },
             )
-            workflow.add_edge(current_tools, current_analyst)
+            workflow.add_conditional_edges(
+                "Bear Researcher",
+                self.conditional_logic.should_continue_debate,
+                {
+                    "Bull Researcher": "Bull Researcher",
+                    "Research Manager": "Research Manager",
+                },
+            )
+            workflow.add_edge("Research Manager", "Trader")
+            workflow.add_edge("Trader", "Aggressive Analyst")
+            workflow.add_conditional_edges(
+                "Aggressive Analyst",
+                self.conditional_logic.should_continue_risk_analysis,
+                {
+                    "Conservative Analyst": "Conservative Analyst",
+                    "Portfolio Manager": "Portfolio Manager",
+                },
+            )
+            workflow.add_conditional_edges(
+                "Conservative Analyst",
+                self.conditional_logic.should_continue_risk_analysis,
+                {
+                    "Neutral Analyst": "Neutral Analyst",
+                    "Portfolio Manager": "Portfolio Manager",
+                },
+            )
+            workflow.add_conditional_edges(
+                "Neutral Analyst",
+                self.conditional_logic.should_continue_risk_analysis,
+                {
+                    "Aggressive Analyst": "Aggressive Analyst",
+                    "Portfolio Manager": "Portfolio Manager",
+                },
+            )
+            workflow.add_edge("Portfolio Manager", END)
 
-            # Connect to next analyst or to Bull Researcher if this is the last analyst
-            if i < len(selected_analysts) - 1:
-                next_analyst = f"{selected_analysts[i+1].capitalize()} Analyst"
-                workflow.add_edge(current_clear, next_analyst)
-            else:
-                workflow.add_edge(current_clear, "Bull Researcher")
-
-        # Add remaining edges
-        workflow.add_conditional_edges(
-            "Bull Researcher",
-            self.conditional_logic.should_continue_debate,
-            {
-                "Bear Researcher": "Bear Researcher",
-                "Research Manager": "Research Manager",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Bear Researcher",
-            self.conditional_logic.should_continue_debate,
-            {
-                "Bull Researcher": "Bull Researcher",
-                "Research Manager": "Research Manager",
-            },
-        )
-        workflow.add_edge("Research Manager", "Trader")
-        workflow.add_edge("Trader", "Aggressive Analyst")
-        workflow.add_conditional_edges(
-            "Aggressive Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Conservative Analyst": "Conservative Analyst",
-                "Portfolio Manager": "Portfolio Manager",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Conservative Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Neutral Analyst": "Neutral Analyst",
-                "Portfolio Manager": "Portfolio Manager",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Neutral Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Aggressive Analyst": "Aggressive Analyst",
-                "Portfolio Manager": "Portfolio Manager",
-            },
-        )
-
-        workflow.add_edge("Portfolio Manager", END)
-
-        # Compile and return
         return workflow.compile()

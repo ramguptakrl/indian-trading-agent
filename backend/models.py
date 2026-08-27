@@ -1,17 +1,37 @@
-"""Pydantic models for the API."""
+"""Pydantic models for the Trade Brain API."""
 
-from pydantic import BaseModel
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, field_validator
+
+from backend.tradebrain.bse_scope import require_bse_trade_target
+from backend.tradebrain.trade_date import normalize_trade_date
 
 
 class AnalysisRequest(BaseModel):
-    ticker: str
+    """BSE Ltd-only Deep Analysis request.
+
+    The Trade Brain branch is intentionally single-instrument. Context instruments are
+    handled by the evidence plane and are not accepted as analysis trade targets.
+    """
+
+    ticker: str = "BSE"
     trade_date: str
-    analysts: list[str] = ["market", "social", "news", "fundamentals"]
+    analysts: list[str] = ["market", "news", "fundamentals"]
     max_debate_rounds: int = 1
     max_risk_discuss_rounds: int = 1
     output_language: str = "English"
+
+    @field_validator("ticker", mode="before")
+    @classmethod
+    def enforce_bse_scope(cls, value: str) -> str:
+        return require_bse_trade_target(value)
+
+    @field_validator("trade_date", mode="before")
+    @classmethod
+    def canonicalize_trade_date(cls, value: object) -> str:
+        return normalize_trade_date(value)
 
 
 class AnalysisResponse(BaseModel):
@@ -44,6 +64,7 @@ class AnalysisResult(BaseModel):
 
 
 class WatchlistItem(BaseModel):
+    # Legacy compatibility model. Watchlist is being removed from the BSE product surface.
     ticker: str
     exchange: str = "NSE"
     name: Optional[str] = None

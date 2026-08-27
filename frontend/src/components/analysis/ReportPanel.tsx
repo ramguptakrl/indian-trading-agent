@@ -12,10 +12,10 @@ interface Props {
 
 const reportTabs = [
   { key: "market_report", label: "Market" },
-  { key: "sentiment_report", label: "Sentiment" },
+  { key: "sentiment_report", label: "Social" },
   { key: "news_report", label: "News" },
   { key: "fundamentals_report", label: "Fundamentals" },
-  { key: "investment_plan", label: "Investment Plan" },
+  { key: "investment_plan", label: "Research Manager" },
   { key: "trader_investment_plan", label: "Trader" },
   { key: "final_trade_decision", label: "Final Decision" },
 ];
@@ -23,16 +23,12 @@ const reportTabs = [
 export function ReportPanel({ reports }: Props) {
   const availableTabs = reportTabs.filter((t) => reports[t.key]);
   const latestTab = availableTabs[availableTabs.length - 1]?.key || "";
-
-  // Controlled tab value — auto-advances as new reports arrive
   const [value, setValue] = useState(latestTab);
 
   useEffect(() => {
-    // When a new report arrives, switch to it (only if we haven't manually picked one that still exists)
     if (!value || !availableTabs.some((t) => t.key === value)) {
       setValue(latestTab);
     } else if (latestTab && latestTab !== value) {
-      // A newer report is available — auto-switch
       setValue(latestTab);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -40,8 +36,8 @@ export function ReportPanel({ reports }: Props) {
 
   if (availableTabs.length === 0) {
     return (
-      <Card className="h-[400px] flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">Reports will appear here as agents complete their analysis...</p>
+      <Card className="h-40 flex items-center justify-center">
+        <p className="text-sm text-muted-foreground">No report is available yet.</p>
       </Card>
     );
   }
@@ -59,8 +55,8 @@ export function ReportPanel({ reports }: Props) {
         <TabsContent key={tab.key} value={tab.key}>
           <Card>
             <CardContent className="p-4">
-              <ScrollArea className="h-[350px]">
-                <div className="prose prose-sm dark:prose-invert max-w-none">
+              <ScrollArea className="h-[280px]">
+                <div className="prose prose-sm dark:prose-invert max-w-none pr-3">
                   <ReactMarkdown>{reports[tab.key] || ""}</ReactMarkdown>
                 </div>
               </ScrollArea>
