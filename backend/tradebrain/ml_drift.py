@@ -12,13 +12,14 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import brier_score_loss
 
+from backend.tradebrain.ml_distribution_drift import psi_feature_report
 from backend.tradebrain.ml_features import FeatureBundle
 from backend.tradebrain.ml_models import feature_schema_hash
 from backend.tradebrain.ml_registry import read_metadata
 from backend.tradebrain.ml_shadow import load_shadow_predictions
 from backend.tradebrain.ml_validation import max_drawdown_from_returns, worst_losing_streak
 
-METHOD_VERSION = "BSE_ML_DRIFT_V1"
+METHOD_VERSION = "BSE_ML_DRIFT_V2"
 
 
 def _finite(series: pd.Series) -> pd.Series:
@@ -93,7 +94,15 @@ def feature_drift_report(
             "current_missing_pct": missing_pct,
             "missing_delta_pct": missing_delta,
         })
-    overall = "DRIFT_ALERT" if severe else ("WATCH" if watch else "STABLE")
+
+    psi = psi_feature_report(recent, metadata.get("psi_baseline") or {})
+    psi_status = str(psi.get("status"))
+    if severe or psi_status == "DRIFT_ALERT":
+        overall = "DRIFT_ALERT"
+    elif watch or psi_status == "WATCH":
+        overall = "WATCH"
+    else:
+        overall = "STABLE"
     return {
         "status": overall,
         "method_version": METHOD_VERSION,
@@ -104,6 +113,8 @@ def feature_drift_report(
         "features_alert": severe,
         "features_watch": watch,
         "details": details,
+        "psi_distribution_drift": psi,
+        "psi_contributes_to_overall_verdict": True,
         "automatic_policy_change": False,
         "human_review_required_on_alert": True,
         "advisory_only": True,
