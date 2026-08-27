@@ -73,13 +73,29 @@ class MLRegistryShadowEvidenceTests(unittest.TestCase):
             },
         )
 
+    @staticmethod
+    def _historical_evidence():
+        return {
+            "promotion_quality": {"passed": True, "verdict": "PROMOTION_QUALITY_PASS"},
+            "cpcv_robustness": {"passed": True, "verdict": "CPCV_ROBUSTNESS_PASS"},
+            "multiple_testing_evidence": {
+                "passed": True,
+                "verdict": "MULTIPLE_TESTING_CLEAR",
+                "dsr": {"passed": True},
+                "pbo": {"passed": True},
+            },
+            "bootstrap_confidence": {
+                "passed": True,
+                "verdict": "BOOTSTRAP_CONFIDENCE_PASS",
+            },
+        }
+
     def _shadow_stage(self, tmp: str):
         metadata = register_optimization(self._result(), code_version="unit-test", root=tmp)
         historical = mark_historical_pass(
             metadata["model_id"],
-            promotion_quality={"passed": True, "verdict": "PROMOTION_QUALITY_PASS"},
-            cpcv_robustness={"passed": True, "verdict": "CPCV_ROBUSTNESS_PASS"},
             root=tmp,
+            **self._historical_evidence(),
         )
         freeze_challenger(
             historical["model_id"],
@@ -89,6 +105,20 @@ class MLRegistryShadowEvidenceTests(unittest.TestCase):
         )
         enable_shadow(historical["model_id"], root=tmp)
         return metadata
+
+    def test_historical_promotion_cannot_bypass_missing_selection_bias_or_bootstrap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            metadata = register_optimization(self._result(), code_version="unit-test", root=tmp)
+            evidence = self._historical_evidence()
+            with self.assertRaises(ValueError):
+                mark_historical_pass(
+                    metadata["model_id"],
+                    promotion_quality=evidence["promotion_quality"],
+                    cpcv_robustness=evidence["cpcv_robustness"],
+                    multiple_testing_evidence={"passed": False},
+                    bootstrap_confidence=evidence["bootstrap_confidence"],
+                    root=tmp,
+                )
 
     def test_human_approval_cannot_bypass_missing_shadow_buffer(self):
         with tempfile.TemporaryDirectory() as tmp:
