@@ -36,7 +36,7 @@ from backend.tradebrain.ml_validation import (
     trading_metrics,
 )
 
-METHOD_VERSION = "BSE_ML_OPTIMIZER_V1"
+METHOD_VERSION = "BSE_ML_OPTIMIZER_V2"
 DEFAULT_THRESHOLDS = (0.50, 0.55, 0.60, 0.65)
 
 
@@ -47,12 +47,16 @@ class OptimizerConfig:
     min_oos_trades: int = 12
     random_state: int = DEFAULT_RANDOM_STATE
     deep_search: bool = False
+    excluded_hypothesis_families: tuple[tuple[str, str], ...] = ()
 
     def validate(self) -> None:
         if not self.thresholds or any(not 0.0 < float(x) < 1.0 for x in self.thresholds):
             raise ValueError("Optimizer thresholds must be probabilities in (0,1)")
         if self.min_validation_trades < 1 or self.min_oos_trades < 1:
             raise ValueError("Minimum trade counts must be positive")
+        for item in self.excluded_hypothesis_families:
+            if len(item) != 2 or not str(item[0]).strip() or not str(item[1]).strip():
+                raise ValueError("Excluded hypothesis families must be (feature_set, model_family) pairs")
 
 
 @dataclass
@@ -279,6 +283,13 @@ def _walk_forward_for_winner(
     return rows
 
 
+def _excluded_family_metadata(config: OptimizerConfig) -> list[dict[str, str]]:
+    return [
+        {"feature_set": str(feature_set), "family": str(family)}
+        for feature_set, family in sorted(set(config.excluded_hypothesis_families))
+    ]
+
+
 def optimize_labeled_dataset(
     bundle: FeatureBundle,
     *,
@@ -288,11 +299,17 @@ def optimize_labeled_dataset(
 ) -> OptimizationResult:
     """Search TRAIN/VALIDATION, freeze one config, then report OOS once.
 
-    HOLDOUT rows are counted but never predicted here.
+    HOLDOUT rows are counted but never predicted here. Families explicitly killed by the
+    persistent research ledger may be excluded without banning other predeclared families.
     """
     config.validate()
     frame = bundle.frame.copy()
     task = str(bundle.metadata.get("task") or "UNKNOWN")
+    excluded_families = {
+        (str(feature_set), str(family))
+        for feature_set, family in config.excluded_hypothesis_families
+    }
+    exclusion_metadata = _excluded_family_metadata(config)
     if frame.empty:
         return OptimizationResult(
             status="INSUFFICIENT_DATA",
@@ -305,7 +322,11 @@ def optimize_labeled_dataset(
             oos_stress_15x=None,
             oos_stress_20x=None,
             walk_forward=[],
-            metadata={"reason": "EMPTY_LABELED_DATASET", "holdout_evaluated": False},
+            metadata={
+                "reason": "EMPTY_LABELED_DATASET",
+                "holdout_evaluated": False,
+                "excluded_hypothesis_families": exclusion_metadata,
+            },
         )
     split = chronological_split(frame, chronology=chronology)
     train = split["TRAIN"]
@@ -328,6 +349,7 @@ def optimize_labeled_dataset(
                 "rows": {name: int(len(value)) for name, value in split.items()},
                 "holdout_evaluated": False,
                 "chronology_method": "BSE_ML_CHRONOLOGY_V1",
+                "excluded_hypothesis_families": exclusion_metadata,
             },
         )
 
@@ -338,6 +360,8 @@ def optimize_labeled_dataset(
 
     for feature_set_name, columns in feature_sets.items():
         for spec in specs:
+            if (str(feature_set_name), str(spec.family)) in excluded_families:
+                continue
             try:
                 model = fit_model(
                     train,
@@ -416,6 +440,8 @@ def optimize_labeled_dataset(
                 "rows": {name: int(len(value)) for name, value in split.items()},
                 "holdout_rows_unseen": int(len(holdout)),
                 "holdout_evaluated": False,
+                "excluded_hypothesis_families": exclusion_metadata,
+                "hypothesis_family_search_exclusions_applied": bool(exclusion_metadata),
                 "automatic_policy_change": False,
                 "trade_authorization": False,
                 "order_execution_allowed": False,
@@ -480,6 +506,8 @@ def optimize_labeled_dataset(
         "random_state": config.random_state,
         "deep_search": config.deep_search,
         "trial_count": len(trials),
+        "excluded_hypothesis_families": exclusion_metadata,
+        "hypothesis_family_search_exclusions_applied": bool(exclusion_metadata),
         "feature_baseline": _feature_baseline(train_validation, frozen_columns),
         "automatic_policy_change": False,
         "human_review_required_for_promotion": True,
