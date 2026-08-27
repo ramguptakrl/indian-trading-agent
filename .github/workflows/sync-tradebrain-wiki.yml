@@ -41,6 +41,7 @@ jobs:
           managed_pages=(
             "Home.md"
             "Current-Status.md"
+            "Session-Handoff.md"
             "Architecture-and-Doctrine.md"
             "ML-Research-Plan.md"
             "Roadmap-and-Next-Steps.md"
